@@ -11,6 +11,6 @@ class JapanStockCommission(bt.CommInfoBase):
         ('commtype', bt.CommInfoBase.COMM_FIXED),
     )
 
-    def _getcommission(self, size, price, pseudoexecprice):
+    def _getcommission(self, size, price, pseudoexec):
         """calculate commission"""
         return abs(size) * price * self.p.commission
