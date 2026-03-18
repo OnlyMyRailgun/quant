@@ -1,54 +1,20 @@
 import argparse
 import sys
 import backtrader as bt
-from src.data.yfinance_loader import fetch_daily_data
+from src.data.bulk_loader import fetch_universe
+from src.data.universe import get_topix_top_10
 from src.strategies.sma_crossover import SmaCross
 from src.engine.commission import JapanStockCommission
 
 
-class _LoggingWrapper(bt.Strategy):
-    """Internal strategy wrapper that adds trade-by-trade logging to any strategy."""
-    params = dict(
-        base_strategy=None,
-        pfast=10,
-        pslow=30,
-        stake=0.95,
-    )
-
-    def __init__(self):
-        self._inner = SmaCross(pfast=self.p.pfast, pslow=self.p.pslow, stake=self.p.stake)
-        self.trade_count = 0
-
-    def notify_order(self, order):
-        if order.status == order.Completed:
-            action = 'BUY ' if order.isbuy() else 'SELL'
-            print(
-                f"  [{self.data.datetime.date(0)}] {action}"
-                f"  price=¥{order.executed.price:,.2f}"
-                f"  size={int(abs(order.executed.size))}"
-                f"  value=¥{order.executed.value:,.2f}"
-                f"  commission=¥{order.executed.comm:,.2f}"
-            )
-
-    def notify_trade(self, trade):
-        if trade.isclosed:
-            self.trade_count += 1
-            result = "✅" if trade.pnlcomm >= 0 else "❌"
-            print(
-                f"  {result} TRADE #{self.trade_count} CLOSED"
-                f"  gross=¥{trade.pnl:,.2f}"
-                f"  net (after fees)=¥{trade.pnlcomm:,.2f}"
-            )
-
-    def next(self):
-        pass  # Logic is in the inner SmaCross (shared indicators on same data)
-
-
-def run_with_logging(data_df, initial_cash=1_000_000.0):
-    """Run a SmaCross backtest with per-trade console logging."""
+def run_with_logging(data_dfs, initial_cash=1_000_000.0):
+    """Run a SmaCross backtest with per-trade console logging for multiple datasets."""
     cerebro = bt.Cerebro()
     cerebro.addstrategy(SmaCross)
-    cerebro.adddata(bt.feeds.PandasData(dataname=data_df))
+    
+    for symbol, df in data_dfs.items():
+        cerebro.adddata(bt.feeds.PandasData(dataname=df), name=symbol)
+        
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.addcommissioninfo(JapanStockCommission())
     cerebro.broker.set_slippage_perc(0.0005)
@@ -56,8 +22,6 @@ def run_with_logging(data_df, initial_cash=1_000_000.0):
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name='drawdown')
 
     # Monkey-patch notify_order/trade onto the strategy class for this run
-    original_next = SmaCross.next
-
     orders_log = []
     trades_log = []
     trade_count = [0]
@@ -65,8 +29,9 @@ def run_with_logging(data_df, initial_cash=1_000_000.0):
     def notify_order(self, order):
         if order.status == order.Completed:
             action = 'BUY ' if order.isbuy() else 'SELL'
+            symbol = order.data._name if hasattr(order.data, '_name') else 'UNKNOWN'
             msg = (
-                f"  [{self.data.datetime.date(0)}] {action}"
+                f"  [{self.data.datetime.date(0)}] {action} {symbol}"
                 f"  price=¥{order.executed.price:,.2f}"
                 f"  size={int(abs(order.executed.size))}"
                 f"  value=¥{order.executed.value:,.2f}"
@@ -79,8 +44,9 @@ def run_with_logging(data_df, initial_cash=1_000_000.0):
         if trade.isclosed:
             trade_count[0] += 1
             result = "✅" if trade.pnlcomm >= 0 else "❌"
+            symbol = trade.data._name if hasattr(trade.data, '_name') else 'UNKNOWN'
             msg = (
-                f"  {result} TRADE #{trade_count[0]} CLOSED"
+                f"  {result} TRADE #{trade_count[0]} CLOSED {symbol}"
                 f"  gross=¥{trade.pnl:,.2f}"
                 f"  net (after fees)=¥{trade.pnlcomm:,.2f}"
             )
@@ -109,18 +75,28 @@ def run_with_logging(data_df, initial_cash=1_000_000.0):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Quant Backtest and Plot Results")
-    parser.add_argument("--ticker", type=str, default="7203.T", help="Ticker symbol (default: Toyota 7203.T)")
+    parser.add_argument("--ticker", type=str, default=None, help="Specific ticker symbol (e.g. 7203.T)")
+    parser.add_argument("--universe", action="store_true", help="Run on the full Top 10 TOPIX Universe")
     parser.add_argument("--start", type=str, default="2023-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default="2024-01-01", help="End date (YYYY-MM-DD)")
     parser.add_argument("--no-plot", action="store_true", help="Disable plotting (useful for CI)")
 
     args = parser.parse_args()
 
-    print(f"Fetching data for {args.ticker} from {args.start} to {args.end}...")
+    symbols = []
+    if args.universe:
+        symbols = get_topix_top_10()
+    elif args.ticker:
+        symbols = [args.ticker]
+    else:
+        # Default behavior
+        symbols = ["7203.T"]
+
+    print(f"Fetching data for {len(symbols)} symbols from {args.start} to {args.end}...")
     try:
-        data_df = fetch_daily_data(args.ticker, args.start, args.end)
-        if data_df.empty:
-            print("Error: No data fetched. Please check the ticker or date range.")
+        data_dfs = fetch_universe(symbols, args.start, args.end)
+        if not data_dfs:
+            print("Error: No data fetched for any symbol.")
             sys.exit(1)
     except Exception as e:
         print(f"Failed to fetch data: {e}")
@@ -131,7 +107,7 @@ def main():
     print("ORDER & TRADE LOG")
     print("=" * 50)
 
-    metrics, cerebro = run_with_logging(data_df, initial_cash=1_000_000.0)
+    metrics, cerebro = run_with_logging(data_dfs, initial_cash=1_000_000.0)
 
     print("=" * 50)
     print("\nBACKTEST RESULTS")

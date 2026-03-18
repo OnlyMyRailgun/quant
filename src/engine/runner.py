@@ -3,15 +3,26 @@ import pandas as pd
 from typing import Type, Dict, Any
 from src.engine.commission import JapanStockCommission
 
-def run_backtest(data_df: pd.DataFrame, strategy_class: Type[bt.Strategy], initial_cash: float = 1000000.0) -> Dict[str, Any]:
+def run_backtest(data_dfs: dict[str, pd.DataFrame], strategy_class, initial_cash=1000000.0, commission=0.001, slippage=0.0005) -> Dict[str, Any]:
+    """
+    Sets up and runs a short backtest using Backtrader.
+    
+    Args:
+        data_dfs: Dict mapping symbol names to historical stock DataFrames.
+        strategy_class: The Backtrader strategy class to use.
+        initial_cash: Starting capital.
+        commission: Commission rate, defaults to 0.1% (real JP approx).
+        slippage: Slippage percentage, defaults to 0.05%.
+    """
     cerebro = bt.Cerebro()
     
     # Add Strategy
     cerebro.addstrategy(strategy_class)
     
-    # Add Data
-    data = bt.feeds.PandasData(dataname=data_df)
-    cerebro.adddata(data)
+    # Add each symbol's data as a separate feed
+    for symbol, df in data_dfs.items():
+        data_feed = bt.feeds.PandasData(dataname=df)
+        cerebro.adddata(data_feed, name=symbol)
     
     # Set Cash & Broker Frictions
     cerebro.broker.setcash(initial_cash)

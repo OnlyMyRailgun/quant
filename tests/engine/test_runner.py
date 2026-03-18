@@ -14,8 +14,8 @@ def test_run_backtest_execution():
         'Volume': [1000] * 50
     }, index=dates)
     
-    # Run backtest
-    results = run_backtest(data, SmaCross, initial_cash=1000000.0)
+    # Run backtest with fake data wrapped in a dict
+    results = run_backtest({"FAKE.T": data}, SmaCross, initial_cash=1000000.0)
     
     # Verify results dict contains metrics
     assert "metrics" in results
