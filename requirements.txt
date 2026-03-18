@@ -1,0 +1,4 @@
+backtrader==1.9.78.123
+pandas>=2.0.0
+yfinance>=0.2.0
+pytest>=7.0.0
