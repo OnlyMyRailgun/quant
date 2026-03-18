@@ -7,6 +7,7 @@ from tabulate import tabulate
 from src.data.universe import get_topix_top_10
 from src.data.bulk_loader import fetch_universe
 from src.paper.db import init_db, get_wallet_balance, fetch_pending_orders, place_pending_order, fill_order
+from src.paper.notifier import send_daily_report
 import sqlite3
 from src.paper.db import DB_PATH
 
@@ -113,6 +114,26 @@ def generate_rebalance_orders():
             
     print("\n✅ Target orders staged in the paper trading database.")
     print("Run this script using 'fill <ORDER_ID> <YOUR_ACTUAL_EXECUTION_PRICE>' tomorrow after you trade them on your app!")
+
+    # Send daily summary email
+    conn2 = sqlite3.connect(DB_PATH)
+    cur2 = conn2.cursor()
+    cur2.execute("SELECT id, date, symbol, action, target_shares, theoretical_price FROM orders WHERE status='PENDING'")
+    pending_orders = cur2.fetchall()
+    cur2.execute('SELECT symbol, shares, avg_price FROM portfolio')
+    full_portfolio = cur2.fetchall()
+    conn2.close()
+
+    winners_list = [
+        {'symbol': row['symbol'], 'price': row['price'], 'score': row['total_score']}
+        for _, row in winners.iterrows()
+    ]
+    send_daily_report(
+        winners=winners_list,
+        orders=pending_orders,
+        cash=wallet_cash,
+        portfolio=full_portfolio,
+    )
 
 def print_status():
     wallet_cash = get_wallet_balance()
