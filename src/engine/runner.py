@@ -1,9 +1,9 @@
 import backtrader as bt
 import pandas as pd
 from typing import Type, Dict, Any
-from src.engine.commission import JapanStockCommission
+from src.engine.commission import JapanStockCommission, load_live_slippage
 
-def run_backtest(data_dfs: dict[str, pd.DataFrame], strategy_class, initial_cash=1000000.0, commission=0.001, slippage=0.0005) -> Dict[str, Any]:
+def run_backtest(data_dfs: dict[str, pd.DataFrame], strategy_class, initial_cash=1000000.0, commission=0.001, slippage=None) -> Dict[str, Any]:
     """
     Sets up and runs a short backtest using Backtrader.
     
@@ -12,7 +12,8 @@ def run_backtest(data_dfs: dict[str, pd.DataFrame], strategy_class, initial_cash
         strategy_class: The Backtrader strategy class to use.
         initial_cash: Starting capital.
         commission: Commission rate, defaults to 0.1% (real JP approx).
-        slippage: Slippage percentage, defaults to 0.05%.
+        slippage: Slippage percentage. If None, auto-loads from paper trader feedback loop
+                  (friction.json), falling back to 0.05% if no live data exists.
     """
     cerebro = bt.Cerebro()
     
@@ -27,8 +28,10 @@ def run_backtest(data_dfs: dict[str, pd.DataFrame], strategy_class, initial_cash
     # Set Cash & Broker Frictions
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.addcommissioninfo(JapanStockCommission())
-    # Add simple slippage: 0.05%
-    cerebro.broker.set_slippage_perc(0.0005)
+    
+    # Dynamically load live-calibrated slippage from Paper Trader feedback loop
+    effective_slippage = slippage if slippage is not None else load_live_slippage()
+    cerebro.broker.set_slippage_perc(effective_slippage)
     
     # Analyzers
     cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name='sharpe')
