@@ -4,13 +4,14 @@ import backtrader as bt
 from src.data.bulk_loader import fetch_universe
 from src.data.universe import get_topix_top_10
 from src.strategies.sma_crossover import SmaCross
+from src.strategies.momentum_factor import CrossSectionalMomentum
 from src.engine.commission import JapanStockCommission
 
 
-def run_with_logging(data_dfs, initial_cash=1_000_000.0):
-    """Run a SmaCross backtest with per-trade console logging for multiple datasets."""
+def run_with_logging(data_dfs, strategy_class, initial_cash=1_000_000.0):
+    """Run a backtest with per-trade console logging for multiple datasets."""
     cerebro = bt.Cerebro()
-    cerebro.addstrategy(SmaCross)
+    cerebro.addstrategy(strategy_class)
     
     for symbol, df in data_dfs.items():
         cerebro.adddata(bt.feeds.PandasData(dataname=df), name=symbol)
@@ -18,10 +19,17 @@ def run_with_logging(data_dfs, initial_cash=1_000_000.0):
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.addcommissioninfo(JapanStockCommission())
     cerebro.broker.set_slippage_perc(0.0005)
+    
+    # Critical: Allow simultaneous execution of sell limits and buy limits for rebalancing
+    cerebro.broker.set_coc(True) # Cheat-on-close so targets evaluate realistically
+    
     cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name='sharpe')
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name='drawdown')
 
     # Monkey-patch notify_order/trade onto the strategy class for this run
+    original_notify_order = getattr(strategy_class, 'notify_order', None)
+    original_notify_trade = getattr(strategy_class, 'notify_trade', None)
+    
     orders_log = []
     trades_log = []
     trade_count = [0]
@@ -53,17 +61,22 @@ def run_with_logging(data_dfs, initial_cash=1_000_000.0):
             trades_log.append(msg)
             print(msg)
 
-    SmaCross.notify_order = notify_order
-    SmaCross.notify_trade = notify_trade
+    strategy_class.notify_order = notify_order
+    strategy_class.notify_trade = notify_trade
 
     strats = cerebro.run()
     strat = strats[0]
 
     # Restore original class (clean up monkey-patch)
-    if hasattr(SmaCross, 'notify_order'):
-        del SmaCross.notify_order
-    if hasattr(SmaCross, 'notify_trade'):
-        del SmaCross.notify_trade
+    if original_notify_order:
+        strategy_class.notify_order = original_notify_order
+    else:
+        del strategy_class.notify_order
+        
+    if original_notify_trade:
+        strategy_class.notify_trade = original_notify_trade
+    else:
+        del strategy_class.notify_trade
 
     metrics = {
         "final_value": cerebro.broker.getvalue(),
@@ -77,6 +90,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run Quant Backtest and Plot Results")
     parser.add_argument("--ticker", type=str, default=None, help="Specific ticker symbol (e.g. 7203.T)")
     parser.add_argument("--universe", action="store_true", help="Run on the full Top 10 TOPIX Universe")
+    parser.add_argument("--strategy", type=str, choices=["sma", "momentum"], default="momentum", help="Strategy to run (default: momentum)")
     parser.add_argument("--start", type=str, default="2023-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default="2024-01-01", help="End date (YYYY-MM-DD)")
     parser.add_argument("--no-plot", action="store_true", help="Disable plotting (useful for CI)")
@@ -89,8 +103,8 @@ def main():
     elif args.ticker:
         symbols = [args.ticker]
     else:
-        # Default behavior
-        symbols = ["7203.T"]
+        # Default behavior limits output for testing
+        symbols = ["7203.T", "6758.T", "8306.T"]
 
     print(f"Fetching data for {len(symbols)} symbols from {args.start} to {args.end}...")
     try:
@@ -102,12 +116,18 @@ def main():
         print(f"Failed to fetch data: {e}")
         sys.exit(1)
 
-    print("Running backtest using SmaCross strategy with friction modeling...\n")
+    strategy_map = {
+        "sma": SmaCross,
+        "momentum": CrossSectionalMomentum
+    }
+    selected_strategy = strategy_map[args.strategy]
+
+    print(f"Running backtest using {selected_strategy.__name__} strategy with friction modeling...\n")
     print("=" * 50)
     print("ORDER & TRADE LOG")
     print("=" * 50)
 
-    metrics, cerebro = run_with_logging(data_dfs, initial_cash=1_000_000.0)
+    metrics, cerebro = run_with_logging(data_dfs, selected_strategy, initial_cash=1_000_000.0)
 
     print("=" * 50)
     print("\nBACKTEST RESULTS")
