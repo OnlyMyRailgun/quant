@@ -5,13 +5,17 @@ from src.data.bulk_loader import fetch_universe
 from src.data.universe import get_topix_top_10
 from src.strategies.sma_crossover import SmaCross
 from src.strategies.momentum_factor import CrossSectionalMomentum
+from src.strategies.multi_factor import UniversalMultiFactor
 from src.engine.commission import JapanStockCommission
 
 
-def run_with_logging(data_dfs, strategy_class, initial_cash=1_000_000.0):
+def run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_000_000.0):
     """Run a backtest with per-trade console logging for multiple datasets."""
     cerebro = bt.Cerebro()
-    cerebro.addstrategy(strategy_class)
+    if kwargs_dict is None:
+        kwargs_dict = {}
+        
+    cerebro.addstrategy(strategy_class, **kwargs_dict)
     
     for symbol, df in data_dfs.items():
         cerebro.adddata(bt.feeds.PandasData(dataname=df), name=symbol)
@@ -90,7 +94,10 @@ def main():
     parser = argparse.ArgumentParser(description="Run Quant Backtest and Plot Results")
     parser.add_argument("--ticker", type=str, default=None, help="Specific ticker symbol (e.g. 7203.T)")
     parser.add_argument("--universe", action="store_true", help="Run on the full Top 10 TOPIX Universe")
-    parser.add_argument("--strategy", type=str, choices=["sma", "momentum"], default="momentum", help="Strategy to run (default: momentum)")
+    parser.add_argument("--strategy", type=str, choices=["sma", "momentum", "multi"], default="multi", help="Strategy to run")
+    parser.add_argument("--weight-mom", type=float, default=1.0, help="Weight for Momentum Factor")
+    parser.add_argument("--weight-vol", type=float, default=1.0, help="Weight for Low Volatility Factor")
+    parser.add_argument("--weight-rev", type=float, default=1.0, help="Weight for Mean Reversion Factor")
     parser.add_argument("--start", type=str, default="2023-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default="2024-01-01", help="End date (YYYY-MM-DD)")
     parser.add_argument("--no-plot", action="store_true", help="Disable plotting (useful for CI)")
@@ -118,16 +125,25 @@ def main():
 
     strategy_map = {
         "sma": SmaCross,
-        "momentum": CrossSectionalMomentum
+        "momentum": CrossSectionalMomentum,
+        "multi": UniversalMultiFactor
     }
     selected_strategy = strategy_map[args.strategy]
+    
+    kwargs = {}
+    if args.strategy == "multi":
+        kwargs = {
+            "weight_mom": args.weight_mom,
+            "weight_vol": args.weight_vol,
+            "weight_rev": args.weight_rev
+        }
 
     print(f"Running backtest using {selected_strategy.__name__} strategy with friction modeling...\n")
     print("=" * 50)
     print("ORDER & TRADE LOG")
     print("=" * 50)
 
-    metrics, cerebro = run_with_logging(data_dfs, selected_strategy, initial_cash=1_000_000.0)
+    metrics, cerebro = run_with_logging(data_dfs, selected_strategy, kwargs_dict=kwargs, initial_cash=1_000_000.0)
 
     print("=" * 50)
     print("\nBACKTEST RESULTS")
