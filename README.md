@@ -7,8 +7,8 @@ Today, the project can:
 - Fetch and cache a small stock universe from Yahoo Finance.
 - Run Backtrader-based backtests across multiple stocks.
 - Rank stocks with cross-sectional factor strategies.
-- Optimize factor weights with a rolling walk-forward workflow that includes benchmark comparisons and portfolio diagnostics.
-- Generate paper-trading rebalance orders from the current signal engine.
+- Optimize factor weights with a rolling walk-forward workflow that includes benchmark comparisons, universe participation diagnostics, and artifact persistence.
+- Generate paper-trading rebalance orders from the current signal engine, using approved research parameters by default.
 
 The current default idea is:
 
@@ -42,15 +42,15 @@ The project has already moved beyond a single-stock toy strategy and now support
   - [`src/engine/commission.py`](/Users/y-yang/Developer/quant/src/engine/commission.py) models commissions and slippage assumptions.
 
 - Optimization
-  - [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) runs a rolling walk-forward search over factor weights and reports benchmark comparisons plus portfolio diagnostics.
+  - [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) runs a rolling walk-forward search over factor weights and reports benchmark comparisons plus portfolio and universe-participation diagnostics.
 
 - Paper trading
-  - [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) generates live rebalance orders from the latest data.
+  - [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) generates live rebalance orders from the latest data using approved parameters by default.
   - [`src/paper/db.py`](/Users/y-yang/Developer/quant/src/paper/db.py) stores cash, holdings, and order history in SQLite.
   - [`src/paper/notifier.py`](/Users/y-yang/Developer/quant/src/paper/notifier.py) sends daily summaries.
 
 - Tests
-  - Tests now cover scoring, diagnostics, walk-forward artifacts, approval flow, and strategy parity, but the overall suite is still smaller than the roadmap would need for a production system.
+  - Tests now cover scoring, diagnostics, walk-forward artifacts, approval flow, and strategy parity, and the current offline suite passes on `main` without network access (`122 passed` at the time of this update).
 
 ### What the current strategy does
 
@@ -73,8 +73,8 @@ Main gaps:
 
 - Data validation now exists as a basic first layer, but it is still lightweight and does not yet cover richer cache-quality or coverage diagnostics.
 - Universe governance is now explicit and reproducible, but the configured universes are still small and static.
-- Portfolio diagnostics now include hit rate and contributor summaries in walk-forward output, but they still need to broaden for larger-universe analysis.
-- The project still needs stronger lifecycle and trust diagnostics before it should be treated as a high-confidence decision engine.
+- Portfolio diagnostics now include hit rate, contributor summaries, and universe-participation coverage in walk-forward output, but they still need to broaden for larger-universe analysis.
+- The project still lacks richer trust diagnostics such as rank-stability and factor-spread reporting, as well as explicit lifecycle states for moving research into paper trading.
 
 ## Planned Milestones
 
@@ -312,7 +312,9 @@ Completed so far:
 
 Still missing for milestone closeout:
 
-- stronger research outputs around larger-universe behavior and lifecycle states
+- stronger research outputs around larger-universe behavior
+- richer trust diagnostics such as rank stability and factor spread
+- explicit lifecycle states between research approval and paper trading
 
 ### Milestone X: Research Platform Foundation
 
@@ -383,7 +385,7 @@ Completed so far:
 
 Next foundation slice:
 
-- richer diagnostics beyond the current hit-rate and contributor summaries, such as rank stability and factor spread analysis
+- richer diagnostics beyond the current hit-rate, contributor, and universe-participation summaries, such as rank stability and factor spread analysis
 - explicit strategy lifecycle states on top of approved-parameter loading
 - broader universe governance beyond the initial named static registry
 
@@ -492,9 +494,7 @@ Scope:
 
 - Build Milestone 2 first.
 
-Status: next active phase.
-
-Current state: complete.
+Status: complete.
 
 Definition of done:
 
@@ -582,9 +582,9 @@ Suggested implementation tasks:
 
 ## Recommended Immediate Next Task
 
-If we are continuing implementation now, the best next task is to build on the now-complete explainability layer with richer diagnostics and broader research governance:
+If we are continuing implementation now, the best next task is to build on the current walk-forward and explainability layers with richer diagnostics and broader research governance:
 
-1. Add portfolio diagnostics such as hit rate, contribution analysis, and rank stability.
+1. Add portfolio diagnostics such as rank stability and factor-spread analysis on top of the existing hit-rate, contribution, and coverage summaries.
 2. Expand named universes in a controlled, reproducible way.
 3. Strengthen lifecycle-state and trust-reporting infrastructure on top of the saved artifacts.
 
