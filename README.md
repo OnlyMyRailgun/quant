@@ -90,7 +90,7 @@ Goal:
 
 ### Milestone 2: Walk-forward decision engine
 
-Status: not started.
+Status: in progress.
 
 Goal:
 
@@ -118,6 +118,18 @@ Acceptance criteria:
   - one-shot optimized weights
   - walk-forward weights
 - The workflow can be rerun deterministically on the same cached data.
+
+Completed so far:
+
+- [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) now runs a rolling walk-forward workflow instead of only a one-shot IS/OOS script.
+- Rolling train and validation window construction lives in [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py).
+- Walk-forward runs persist per-rebalance weights and summary artifacts under `.research_artifacts/`.
+- Regression coverage for walk-forward windowing, weight selection, artifact writing, and runner output lives in [`tests/research/test_walk_forward.py`](/Users/y-yang/Developer/quant/tests/research/test_walk_forward.py).
+
+Remaining for milestone completion:
+
+- Add stronger coverage or reporting around one-shot optimized weights versus walk-forward weights in the same workflow output.
+- Tighten determinism guarantees and artifact-loading ergonomics for downstream consumers.
 
 ### Milestone 3: Explainable stock selection
 
@@ -180,6 +192,7 @@ Completed so far:
 - Shared scoring logic now lives in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py).
 - [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) uses the shared scorer instead of maintaining a separate factor-math path.
 - Tests cover ranking parity between the shared scorer and paper-signal generation.
+- Walk-forward parameter artifacts can now be produced by [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py).
 
 Remaining for milestone completion:
 
@@ -239,6 +252,7 @@ Completed so far:
 - Shared scoring behavior is covered in [`tests/scoring/test_multi_factor.py`](/Users/y-yang/Developer/quant/tests/scoring/test_multi_factor.py).
 - Artifact writing and registry behavior are covered in [`tests/research/test_artifacts.py`](/Users/y-yang/Developer/quant/tests/research/test_artifacts.py).
 - Paper-signal parity with the shared scorer is covered at the unit-test level.
+- Walk-forward runner behavior and artifact shape are covered in [`tests/research/test_walk_forward.py`](/Users/y-yang/Developer/quant/tests/research/test_walk_forward.py).
 
 Remaining for milestone completion:
 
@@ -329,6 +343,7 @@ Completed so far:
 - Experiment Registry in [`src/research/registry.py`](/Users/y-yang/Developer/quant/src/research/registry.py)
 - Research Artifact Store in [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py)
 - Paper-signal integration through [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py)
+- Walk-forward orchestration and weight artifacts through [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py) and [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py)
 
 Next foundation slice:
 
@@ -441,6 +456,8 @@ Scope:
 - Build Milestone 2 first.
 
 Status: next active phase.
+
+Current state: in progress.
 
 Definition of done:
 
