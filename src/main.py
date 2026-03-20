@@ -1,5 +1,6 @@
 import argparse
 import sys
+from typing import TextIO
 import backtrader as bt
 from src.data.bulk_loader import fetch_universe
 from src.data.universe import get_topix_top_10
@@ -112,6 +113,50 @@ def resolve_multi_factor_weights(
     }
 
 
+def resolve_multi_factor_strategy_kwargs(
+    artifact_dir,
+    weight_mom,
+    weight_vol,
+    weight_rev,
+    buy_rank_threshold=None,
+    sell_rank_threshold=None,
+):
+    kwargs = resolve_multi_factor_weights(
+        artifact_dir=artifact_dir,
+        weight_mom=weight_mom,
+        weight_vol=weight_vol,
+        weight_rev=weight_rev,
+    )
+    if buy_rank_threshold is not None:
+        kwargs["buy_rank_threshold"] = buy_rank_threshold
+    if sell_rank_threshold is not None:
+        kwargs["sell_rank_threshold"] = sell_rank_threshold
+    return kwargs
+
+
+def render_backtest_results(
+    metrics,
+    initial_cash: float,
+    strategy_name: str,
+    output: TextIO = sys.stdout,
+):
+    print("\nBACKTEST RESULTS", file=output)
+    print("=" * 40, file=output)
+    print(f"Strategy        : {strategy_name}", file=output)
+    print(f"Initial Capital : ¥{initial_cash:,.2f}", file=output)
+    print(f"Final Capital   : ¥{metrics['final_value']:,.2f}", file=output)
+    simple_return = (metrics["final_value"] - initial_cash) / initial_cash * 100
+    print(f"Total Return    : {simple_return:.2f}%", file=output)
+    print(f"Max Drawdown    : {metrics['max_drawdown']:.2f}%", file=output)
+    sharpe_val = metrics["sharpe"] if metrics["sharpe"] is not None else 0.0
+    print(f"Sharpe Ratio    : {sharpe_val:.4f}", file=output)
+    if strategy_name == "UniversalMultiFactor":
+        print(f"Rebalance Count : {metrics.get('rebalance_count', 0)}", file=output)
+        print(f"Position Changes: {metrics.get('position_change_count', 0)}", file=output)
+        print(f"Turnover Ratio  : {metrics.get('turnover_ratio', 0.0):.4f}", file=output)
+    print("=" * 40 + "\n", file=output)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run Quant Backtest and Plot Results")
     parser.add_argument("--ticker", type=str, default=None, help="Specific ticker symbol (e.g. 7203.T)")
@@ -120,6 +165,8 @@ def main():
     parser.add_argument("--weight-mom", type=float, default=None, help="Weight for Momentum Factor")
     parser.add_argument("--weight-vol", type=float, default=None, help="Weight for Low Volatility Factor")
     parser.add_argument("--weight-rev", type=float, default=None, help="Weight for Mean Reversion Factor")
+    parser.add_argument("--buy-rank-threshold", type=int, default=None, help="Buy only when rank is at or above this threshold")
+    parser.add_argument("--sell-rank-threshold", type=int, default=None, help="Keep holdings until rank falls below this threshold")
     parser.add_argument("--start", type=str, default="2023-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default="2024-01-01", help="End date (YYYY-MM-DD)")
     parser.add_argument("--no-plot", action="store_true", help="Disable plotting (useful for CI)")
@@ -154,11 +201,13 @@ def main():
     
     kwargs = {}
     if args.strategy == "multi":
-        kwargs = resolve_multi_factor_weights(
+        kwargs = resolve_multi_factor_strategy_kwargs(
             artifact_dir=DEFAULT_ARTIFACT_DIR,
             weight_mom=args.weight_mom,
             weight_vol=args.weight_vol,
             weight_rev=args.weight_rev,
+            buy_rank_threshold=args.buy_rank_threshold,
+            sell_rank_threshold=args.sell_rank_threshold,
         )
 
     print(f"Running backtest using {selected_strategy.__name__} strategy with friction modeling...\n")
@@ -169,16 +218,11 @@ def main():
     metrics, cerebro = run_with_logging(data_dfs, selected_strategy, kwargs_dict=kwargs, initial_cash=1_000_000.0)
 
     print("=" * 50)
-    print("\nBACKTEST RESULTS")
-    print("=" * 40)
-    print(f"Initial Capital : ¥1,000,000.00")
-    print(f"Final Capital   : ¥{metrics['final_value']:,.2f}")
-    simple_return = (metrics['final_value'] - 1_000_000.0) / 1_000_000.0 * 100
-    print(f"Total Return    : {simple_return:.2f}%")
-    print(f"Max Drawdown    : {metrics['max_drawdown']:.2f}%")
-    sharpe_val = metrics['sharpe'] if metrics['sharpe'] is not None else 0.0
-    print(f"Sharpe Ratio    : {sharpe_val:.4f}")
-    print("=" * 40 + "\n")
+    render_backtest_results(
+        metrics=metrics,
+        initial_cash=1_000_000.0,
+        strategy_name=selected_strategy.__name__,
+    )
 
     if not args.no_plot:
         print("Rendering chart... (Close the chart window to exit the program)")
