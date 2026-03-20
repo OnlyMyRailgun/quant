@@ -9,9 +9,9 @@ import backtrader as bt
 import pandas as pd
 
 from src.data.bulk_loader import fetch_universe
-from src.data.universe import get_topix_top_10
+from src.data.universe import get_topix_top_10, get_universe
 from src.engine.commission import JapanStockCommission
-from src.research.artifacts import DEFAULT_ARTIFACT_DIR
+from src.research.artifacts import DEFAULT_ARTIFACT_DIR, build_walk_forward_metadata, write_walk_forward_run
 from src.research.walk_forward import run_walk_forward_experiment
 from src.strategies.multi_factor import UniversalMultiFactor
 
@@ -121,6 +121,8 @@ def run_walk_forward_optimization(
     step_months: int = 3,
     artifact_dir: Path | None = DEFAULT_ARTIFACT_DIR,
     benchmark_data_dfs: dict[str, pd.DataFrame] | None = None,
+    universe_name: str | None = None,
+    universe_symbols: list[str] | None = None,
 ) -> dict[str, object]:
     benchmark_evaluators = None
     if benchmark_data_dfs:
@@ -131,7 +133,7 @@ def run_walk_forward_optimization(
                     window["validation_start"],
                     window["validation_end"],
                 )
-            )
+        )
             for benchmark_name, benchmark_df in benchmark_data_dfs.items()
         }
 
@@ -173,11 +175,25 @@ def run_walk_forward_optimization(
             weights,
         ),
         evaluate_benchmark_windows=benchmark_evaluators,
-        artifact_dir=Path(artifact_dir) if artifact_dir is not None else None,
+        artifact_dir=None,
     )
 
     weights = result["weights"]
     summary = result["summary"]
+    metadata = build_walk_forward_metadata(
+        result.get("metadata", {}),
+        universe_name=universe_name,
+        universe_symbols=universe_symbols if universe_symbols is not None else list(data_dfs.keys()),
+    )
+    result["metadata"] = metadata
+
+    if artifact_dir is not None:
+        result["artifacts"] = write_walk_forward_run(
+            base_dir=Path(artifact_dir),
+            metadata=metadata,
+            weights=weights,
+            summary=summary,
+        )
 
     print("=" * 60)
     print("WALK-FORWARD OPTIMIZATION SUMMARY")
@@ -205,6 +221,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run walk-forward optimization research")
     parser.add_argument("--start", default=DEFAULT_OPTIMIZE_START, help="Research start date (YYYY-MM-DD)")
     parser.add_argument("--end", default=DEFAULT_OPTIMIZE_END, help="Research end date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--universe-name",
+        default=None,
+        help="Named universe from src.data.universe to load (defaults to Topix-10)",
+    )
     parser.add_argument("--train-months", type=int, default=DEFAULT_TRAIN_MONTHS, help="Training window length in months")
     parser.add_argument(
         "--validation-months",
@@ -219,7 +240,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv if argv is not None else [])
-    symbols = get_topix_top_10()
+    if args.universe_name:
+        symbols = get_universe(args.universe_name)
+        universe_name = args.universe_name
+    else:
+        symbols = get_topix_top_10()
+        universe_name = "topix_top_10"
     print(
         "Fetching historical data for walk-forward optimization "
         f"({args.start} -> {args.end})..."
@@ -246,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
             validation_months=args.validation_months,
             step_months=args.step_months,
             artifact_dir=args.artifact_dir,
+            universe_name=universe_name,
+            universe_symbols=symbols,
             benchmark_data_dfs={
                 benchmark_name: benchmark_data_dfs[symbol]
                 for benchmark_name, symbol in DEFAULT_BENCHMARK_SYMBOLS.items()
@@ -260,4 +288,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

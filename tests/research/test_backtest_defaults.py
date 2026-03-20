@@ -79,6 +79,8 @@ def test_resolve_multi_factor_strategy_kwargs_preserves_weight_defaults_and_thre
         weight_rev=None,
         buy_rank_threshold=2,
         sell_rank_threshold=4,
+        artifact_run_name="backtest_rebalance",
+        universe_name="topix_top_10",
     )
 
     assert kwargs == {
@@ -87,6 +89,9 @@ def test_resolve_multi_factor_strategy_kwargs_preserves_weight_defaults_and_thre
         "weight_rev": 0.5,
         "buy_rank_threshold": 2,
         "sell_rank_threshold": 4,
+        "artifact_dir": tmp_path,
+        "artifact_run_name": "backtest_rebalance",
+        "universe_name": "topix_top_10",
     }
 
 
@@ -162,11 +167,102 @@ def test_main_multi_factor_offline_smoke_uses_approved_params_and_skips_plot(mon
         "weight_mom": 0.25,
         "weight_vol": 0.75,
         "weight_rev": 0.5,
+        "artifact_dir": tmp_path,
+        "artifact_run_name": "backtest_rebalance",
+        "universe_name": "topix_top_10",
     }
     assert captured["initial_cash"] == 1_000_000.0
     assert fetch_calls == [
         {
             "symbols": ["AAA.T", "BBB.T"],
+            "start": "2023-01-01",
+            "end": "2024-01-01",
+        }
+    ]
+
+
+def test_main_multi_factor_can_select_named_universe_without_affecting_default_ticker_list(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+):
+    write_approved_params(tmp_path, {"mom": 0.25, "vol": 0.75, "rev": 0.5})
+    monkeypatch.setattr(main, "DEFAULT_ARTIFACT_DIR", tmp_path)
+
+    fetch_calls = []
+
+    def fake_get_universe(name):
+        assert name == "custom_universe"
+        return ["1111.T", "2222.T"]
+
+    def fake_get_topix_top_10():  # pragma: no cover - sanity guard
+        raise AssertionError("get_topix_top_10 should not be used when --universe-name is set")
+
+    def fake_fetch_universe(symbols, start, end):
+        fetch_calls.append({"symbols": symbols, "start": start, "end": end})
+        return {symbol: pd.DataFrame({"Close": [100.0, 101.0]}) for symbol in symbols}
+
+    monkeypatch.setattr(main, "get_universe", fake_get_universe)
+    monkeypatch.setattr(main, "get_topix_top_10", fake_get_topix_top_10)
+    monkeypatch.setattr(main, "fetch_universe", fake_fetch_universe)
+    captured = {}
+
+    def fake_run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_000_000.0):
+        captured["kwargs_dict"] = kwargs_dict
+        return ({"final_value": 1_000_000.0, "sharpe": 0.0, "max_drawdown": 0.0}, object())
+
+    monkeypatch.setattr(main, "run_with_logging", fake_run_with_logging)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--strategy", "multi", "--universe-name", "custom_universe", "--no-plot"])
+
+    exit_code = main.main()
+
+    output = capsys.readouterr().out
+    assert exit_code is None
+    assert "Fetching data for 2 symbols from 2023-01-01 to 2024-01-01" in output
+    assert fetch_calls == [
+        {
+            "symbols": ["1111.T", "2222.T"],
+            "start": "2023-01-01",
+            "end": "2024-01-01",
+        }
+    ]
+    assert captured["kwargs_dict"] == {
+        "weight_mom": 0.25,
+        "weight_vol": 0.75,
+        "weight_rev": 0.5,
+        "artifact_dir": tmp_path,
+        "artifact_run_name": "backtest_rebalance",
+        "universe_name": "custom_universe",
+    }
+
+
+def test_main_multi_factor_defaults_to_existing_small_ticker_list_when_no_universe_is_selected(
+    monkeypatch,
+    tmp_path: Path,
+):
+    write_approved_params(tmp_path, {"mom": 0.25, "vol": 0.75, "rev": 0.5})
+    monkeypatch.setattr(main, "DEFAULT_ARTIFACT_DIR", tmp_path)
+
+    fetch_calls = []
+
+    def fake_get_universe(name):  # pragma: no cover - sanity guard
+        raise AssertionError(f"get_universe should not be used for default ticker fallback: {name}")
+
+    def fake_fetch_universe(symbols, start, end):
+        fetch_calls.append({"symbols": symbols, "start": start, "end": end})
+        return {symbol: pd.DataFrame({"Close": [100.0, 101.0]}) for symbol in symbols}
+
+    monkeypatch.setattr(main, "get_universe", fake_get_universe)
+    monkeypatch.setattr(main, "fetch_universe", fake_fetch_universe)
+    monkeypatch.setattr(main, "run_with_logging", lambda *args, **kwargs: ({"final_value": 1_000_000.0, "sharpe": 0.0, "max_drawdown": 0.0}, object()))
+    monkeypatch.setattr(sys, "argv", ["main.py", "--strategy", "multi", "--no-plot"])
+
+    exit_code = main.main()
+
+    assert exit_code is None
+    assert fetch_calls == [
+        {
+            "symbols": ["7203.T", "6758.T", "8306.T"],
             "start": "2023-01-01",
             "end": "2024-01-01",
         }

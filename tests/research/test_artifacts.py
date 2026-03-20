@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.paper.bot import calculate_current_signals
-from src.research.artifacts import build_scoring_metadata, write_scoring_run
+from src.research.artifacts import build_scoring_metadata, build_walk_forward_metadata, write_scoring_run
 from src.research.registry import append_run_record, create_run_id
 from src.scoring.multi_factor import score_universe
 
@@ -94,6 +94,21 @@ def test_build_scoring_metadata_derives_standard_payload_from_scores():
         "weights": {"mom": 1.5, "vol": 0.5, "rev": 2.0},
         "lookbacks": {"mom": 90, "vol": 20, "rev": 20},
         "universe": ["AAA.T", "BBB.T"],
+    }
+
+
+def test_build_walk_forward_metadata_includes_universe_fields_when_provided():
+    metadata = build_walk_forward_metadata(
+        {"start": "2021-01-01", "end": "2021-12-31"},
+        universe_name="topix_top_10",
+        universe_symbols=["AAA.T", "BBB.T"],
+    )
+
+    assert metadata == {
+        "start": "2021-01-01",
+        "end": "2021-12-31",
+        "universe_name": "topix_top_10",
+        "universe_symbols": ["AAA.T", "BBB.T"],
     }
 
 

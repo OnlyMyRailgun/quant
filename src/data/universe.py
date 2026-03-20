@@ -1,7 +1,8 @@
-def get_topix_top_10() -> list[str]:
-    """Returns a hardcoded list of the top 10 TOPIX components by market cap (approximate).
-    Suffix '.T' is required for Yahoo Finance Japanese stocks."""
-    return [
+from __future__ import annotations
+
+
+_UNIVERSES: dict[str, tuple[str, ...]] = {
+    "topix_top_10": (
         "7203.T",  # Toyota
         "6758.T",  # Sony
         "8306.T",  # Mitsubishi UFJ
@@ -12,4 +13,21 @@ def get_topix_top_10() -> list[str]:
         "8316.T",  # SMFG
         "6098.T",  # Recruit
         "7974.T",  # Nintendo
-    ]
+    ),
+}
+
+
+def list_universe_names() -> list[str]:
+    return list(_UNIVERSES.keys())
+
+
+def get_universe(name: str) -> list[str]:
+    try:
+        return list(_UNIVERSES[name])
+    except KeyError as exc:
+        raise KeyError(f"Unknown universe: {name}") from exc
+
+
+def get_topix_top_10() -> list[str]:
+    """Returns the named TOPIX top 10 universe."""
+    return get_universe("topix_top_10")

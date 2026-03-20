@@ -3,7 +3,7 @@ import sys
 from typing import TextIO
 import backtrader as bt
 from src.data.bulk_loader import fetch_universe
-from src.data.universe import get_topix_top_10
+from src.data.universe import get_topix_top_10, get_universe
 from src.strategies.sma_crossover import SmaCross
 from src.strategies.momentum_factor import CrossSectionalMomentum
 from src.strategies.multi_factor import UniversalMultiFactor
@@ -120,6 +120,8 @@ def resolve_multi_factor_strategy_kwargs(
     weight_rev,
     buy_rank_threshold=None,
     sell_rank_threshold=None,
+    artifact_run_name=None,
+    universe_name=None,
 ):
     kwargs = resolve_multi_factor_weights(
         artifact_dir=artifact_dir,
@@ -131,6 +133,12 @@ def resolve_multi_factor_strategy_kwargs(
         kwargs["buy_rank_threshold"] = buy_rank_threshold
     if sell_rank_threshold is not None:
         kwargs["sell_rank_threshold"] = sell_rank_threshold
+    if artifact_dir is not None:
+        kwargs["artifact_dir"] = artifact_dir
+    if artifact_run_name is not None:
+        kwargs["artifact_run_name"] = artifact_run_name
+    if universe_name is not None:
+        kwargs["universe_name"] = universe_name
     return kwargs
 
 
@@ -161,6 +169,12 @@ def main():
     parser = argparse.ArgumentParser(description="Run Quant Backtest and Plot Results")
     parser.add_argument("--ticker", type=str, default=None, help="Specific ticker symbol (e.g. 7203.T)")
     parser.add_argument("--universe", action="store_true", help="Run on the full Top 10 TOPIX Universe")
+    parser.add_argument(
+        "--universe-name",
+        type=str,
+        default=None,
+        help="Run on a named universe from src.data.universe",
+    )
     parser.add_argument("--strategy", type=str, choices=["sma", "momentum", "multi"], default="multi", help="Strategy to run")
     parser.add_argument("--weight-mom", type=float, default=None, help="Weight for Momentum Factor")
     parser.add_argument("--weight-vol", type=float, default=None, help="Weight for Low Volatility Factor")
@@ -174,10 +188,15 @@ def main():
     args = parser.parse_args()
 
     symbols = []
-    if args.universe:
-        symbols = get_topix_top_10()
-    elif args.ticker:
+    selected_universe_name = None
+    if args.ticker:
         symbols = [args.ticker]
+    elif args.universe_name:
+        symbols = get_universe(args.universe_name)
+        selected_universe_name = args.universe_name
+    elif args.universe:
+        symbols = get_topix_top_10()
+        selected_universe_name = "topix_top_10"
     else:
         # Default behavior limits output for testing
         symbols = ["7203.T", "6758.T", "8306.T"]
@@ -208,6 +227,8 @@ def main():
             weight_rev=args.weight_rev,
             buy_rank_threshold=args.buy_rank_threshold,
             sell_rank_threshold=args.sell_rank_threshold,
+            artifact_run_name="backtest_rebalance",
+            universe_name=selected_universe_name,
         )
 
     print(f"Running backtest using {selected_strategy.__name__} strategy with friction modeling...\n")

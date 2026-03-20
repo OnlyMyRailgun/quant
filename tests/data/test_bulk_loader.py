@@ -101,3 +101,25 @@ def test_fetch_universe_refreshes_cache_when_right_side_of_requested_range_is_mi
 
     if cache_path.exists():
         cache_path.unlink()
+
+
+@patch('src.data.bulk_loader.fetch_daily_data')
+def test_fetch_universe_skips_invalid_symbols_and_reports_reason(mock_fetch, capsys):
+    valid_symbol = "VALID.T"
+    invalid_symbol = "INVALID.T"
+    valid_df = pd.DataFrame({"Close": [100.0, 101.0]}, index=pd.date_range("2024-01-01", periods=2))
+    invalid_df = pd.DataFrame({"Close": [100.0, 101.0]}, index=pd.to_datetime(["2024-01-02", "2024-01-01"]))
+    mock_fetch.side_effect = [valid_df, invalid_df]
+
+    for symbol in (valid_symbol, invalid_symbol):
+        cache_path = CACHE_DIR / f"{symbol}.parquet"
+        if cache_path.exists():
+            cache_path.unlink()
+
+    dfs = fetch_universe([valid_symbol, invalid_symbol], "2024-01-01", "2024-01-02")
+    captured = capsys.readouterr()
+
+    assert valid_symbol in dfs
+    assert invalid_symbol not in dfs
+    assert "INVALID.T" in captured.out
+    assert "unsorted timestamps" in captured.out

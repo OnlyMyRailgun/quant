@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import backtrader as bt
 import pandas as pd
 
@@ -21,6 +24,15 @@ def run_strategy_with_history(data_dfs, **kwargs):
     cerebro.broker.setcash(1_000_000.0)
     cerebro.run(runonce=False, preload=True)
     return cerebro.runstrats[0][0]
+
+
+def _build_month_change_data():
+    dates = pd.date_range("2024-01-01", periods=240, freq="D")
+    return {
+        "AAA.T": pd.DataFrame({"Close": [100 + i * 0.5 for i in range(len(dates))]}, index=dates),
+        "BBB.T": pd.DataFrame({"Close": [220 - i * 0.3 for i in range(len(dates))]}, index=dates),
+        "CCC.T": pd.DataFrame({"Close": [150 + ((i % 14) - 7) * 0.25 for i in range(len(dates))]}, index=dates),
+    }
 
 
 def test_collect_visible_history_returns_symbol_dataframes():
@@ -189,3 +201,37 @@ def test_shared_strategy_and_paper_paths_match_under_same_weights():
     assert strategy_ranked["symbol"].tolist() == shared["symbol"].tolist()
     assert paper["symbol"].tolist() == shared.head(2)["symbol"].tolist()
     assert paper["total_score"].tolist() == shared.head(2)["total_score"].tolist()
+
+
+def test_rebalance_writes_one_artifact_per_month_change_with_explainability(tmp_path: Path):
+    data = _build_month_change_data()
+
+    strategy = run_strategy_with_history(
+        data,
+        lookback_mom=90,
+        lookback_vol=20,
+        lookback_rev=20,
+        weight_mom=0.5,
+        weight_vol=1.0,
+        weight_rev=0.5,
+        top_n=2,
+        artifact_dir=tmp_path,
+        artifact_run_name="multi_factor_rebalance",
+        universe_name="demo_universe",
+    )
+
+    run_root = tmp_path / "multi_factor_rebalance"
+    run_dirs = sorted(path for path in run_root.iterdir() if path.is_dir())
+
+    assert strategy.rebalance_count == len(run_dirs)
+    assert strategy.rebalance_count >= 3
+
+    for run_dir in run_dirs:
+        metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
+        scores = pd.read_csv(run_dir / "scores.csv")
+        summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+
+        assert metadata["universe_name"] == "demo_universe"
+        assert metadata["rebalance_date"]
+        assert summary["winner_count"] <= summary["top_n"]
+        assert {"mom_contribution", "vol_contribution", "rev_contribution"}.issubset(scores.columns)

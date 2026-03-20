@@ -1,8 +1,10 @@
+from pathlib import Path
 import math
 import statistics
 import backtrader as bt
 import pandas as pd
 
+from src.research.artifacts import build_scoring_metadata, build_scoring_summary, write_scoring_run
 from src.scoring.multi_factor import score_universe
 
 class UniversalMultiFactor(bt.Strategy):
@@ -22,6 +24,9 @@ class UniversalMultiFactor(bt.Strategy):
         top_n=3,             # Top N to hold
         buy_rank_threshold=None,
         sell_rank_threshold=None,
+        artifact_dir=None,
+        artifact_run_name="multi_factor_rebalance",
+        universe_name=None,
     )
 
     def __init__(self):
@@ -98,6 +103,43 @@ class UniversalMultiFactor(bt.Strategy):
             lookback_rev=self.p.lookback_rev,
         )
 
+    def _persist_rebalance_artifact(self, ranked: pd.DataFrame):
+        if self.p.artifact_dir is None:
+            return
+
+        rebalance_date = self.data.datetime.date(0).isoformat()
+        metadata = build_scoring_metadata(
+            scores=ranked,
+            top_n=self.p.top_n,
+            weights={
+                "mom": self.p.weight_mom,
+                "vol": self.p.weight_vol,
+                "rev": self.p.weight_rev,
+            },
+            lookbacks={
+                "mom": self.p.lookback_mom,
+                "vol": self.p.lookback_vol,
+                "rev": self.p.lookback_rev,
+            },
+        )
+        metadata["rebalance_date"] = rebalance_date
+        if self.p.universe_name is not None:
+            metadata["universe_name"] = self.p.universe_name
+
+        summary = build_scoring_summary(
+            scores=ranked,
+            top_n=self.p.top_n,
+            extra_summary={"rebalance_date": rebalance_date},
+        )
+
+        write_scoring_run(
+            base_dir=Path(self.p.artifact_dir),
+            run_name=self.p.artifact_run_name,
+            metadata=metadata,
+            scores=ranked,
+            summary=summary,
+        )
+
     def _resolve_rank_thresholds(self) -> tuple[int, int]:
         buy_rank_threshold = self.p.buy_rank_threshold or self.p.top_n
         sell_rank_threshold = self.p.sell_rank_threshold or self.p.top_n
@@ -111,6 +153,7 @@ class UniversalMultiFactor(bt.Strategy):
             return
 
         self.rebalance_count += 1
+        self._persist_rebalance_artifact(ranked)
         buy_rank_threshold, sell_rank_threshold = self._resolve_rank_thresholds()
         data_by_symbol = {data._name: data for data in self.datas}
         rank_by_symbol = dict(zip(ranked["symbol"], ranked["rank"]))

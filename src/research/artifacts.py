@@ -18,6 +18,19 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def build_walk_forward_metadata(
+    metadata: dict,
+    universe_name: str | None = None,
+    universe_symbols: list[str] | None = None,
+) -> dict:
+    payload = dict(metadata)
+    if universe_name is not None:
+        payload["universe_name"] = universe_name
+    if universe_symbols is not None:
+        payload["universe_symbols"] = list(universe_symbols)
+    return payload
+
+
 def build_scoring_metadata(
     scores: pd.DataFrame,
     top_n: int,

@@ -265,6 +265,8 @@ def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator
         validation_months=6,
         step_months=6,
         artifact_dir=tmp_path,
+        universe_name="topix_top_10",
+        universe_symbols=["AAA.T"],
     )
 
     assert result["summary"] == {
@@ -285,6 +287,8 @@ def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator
     assert metadata["start"] == "2021-01-01"
     assert metadata["end"] == "2021-12-31"
     assert metadata["one_shot_weights"] == {"mom": 0.0, "vol": 1.0, "rev": 0.0}
+    assert metadata["universe_name"] == "topix_top_10"
+    assert metadata["universe_symbols"] == ["AAA.T"]
     assert summary == result["summary"]
     assert saved_weights["rebalance_date"].tolist() == ["2021-07-01"]
 
@@ -347,6 +351,45 @@ def test_optimize_main_uses_default_research_window_and_cli_defaults(monkeypatch
     assert captured["run"]["validation_months"] == 6
     assert captured["run"]["step_months"] == 6
     assert set(captured["run"]["benchmark_data_dfs"]) == {"topx", "n225"}
+
+
+def test_optimize_main_can_select_a_named_universe(monkeypatch):
+    captured = {"fetch_calls": []}
+
+    def fake_get_universe(name):
+        assert name == "growth_universe"
+        return ["AAA.T", "BBB.T"]
+
+    def fake_fetch_universe(symbols, start, end):
+        captured["fetch_calls"].append({
+            "symbols": symbols,
+            "start": start,
+            "end": end,
+        })
+        if symbols == ["AAA.T", "BBB.T"]:
+            return {
+                "AAA.T": pd.DataFrame(),
+                "BBB.T": pd.DataFrame(),
+            }
+        return {
+            "1306.T": pd.DataFrame(),
+            "1321.T": pd.DataFrame(),
+        }
+
+    def fake_run_walk_forward_optimization(**kwargs):
+        captured["run"] = kwargs
+        return {"weights": pd.DataFrame(), "summary": {"window_count": 0, "baseline_return_pct": 0.0, "walk_forward_return_pct": 0.0}}
+
+    monkeypatch.setattr(optimize, "get_universe", fake_get_universe)
+    monkeypatch.setattr(optimize, "fetch_universe", fake_fetch_universe)
+    monkeypatch.setattr(optimize, "run_walk_forward_optimization", fake_run_walk_forward_optimization)
+
+    exit_code = optimize.main(["--universe-name", "growth_universe"])
+
+    assert exit_code == 0
+    assert captured["fetch_calls"][0]["symbols"] == ["AAA.T", "BBB.T"]
+    assert captured["run"]["universe_name"] == "growth_universe"
+    assert captured["run"]["universe_symbols"] == ["AAA.T", "BBB.T"]
 
 
 def test_optimize_main_accepts_cli_overrides_for_window_parameters(monkeypatch):

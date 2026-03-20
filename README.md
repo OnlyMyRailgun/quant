@@ -71,12 +71,10 @@ The project is in a strong prototype stage, but it is not yet a robust productio
 
 Main gaps:
 
-- The optimizer uses a one-time train/test split rather than a rolling walk-forward process.
-- The live paper-trading signal path does not yet fully depend on dynamically validated parameters.
-- The stock-selection output is not very explainable yet; we do not persist factor contributions per rebalance.
-- Portfolio turnover control is limited, so rank churn can create unnecessary trading.
-- Test coverage does not yet deeply validate ranking behavior, rebalance decisions, or paper/live consistency.
-- Universe construction is still relatively small and static.
+- Data validation now exists as a basic first layer, but it is still lightweight and does not yet cover richer cache-quality or coverage diagnostics.
+- Universe governance is now explicit and reproducible, but the configured universes are still small and static.
+- Portfolio diagnostics beyond return and simple turnover metrics remain limited.
+- The project still needs stronger lifecycle and trust diagnostics before it should be treated as a high-confidence decision engine.
 
 ## Planned Milestones
 
@@ -130,7 +128,7 @@ Completed so far:
 
 ### Milestone 3: Explainable stock selection
 
-Status: not started.
+Status: complete.
 
 Goal:
 
@@ -158,6 +156,15 @@ Acceptance criteria:
 - The system can show the selected stocks and at least the next few near-miss candidates.
 - A user can inspect why one stock ranked above another on a given rebalance date.
 - The explainability output is generated from the same scoring logic as the strategy itself.
+
+Completed so far:
+
+- The shared scorer in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py) now emits factor contribution columns alongside raw factors, Z-scores, total score, rank, and top-`N` flags.
+- Paper-signal artifacts written through [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) and [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py) now persist winners, near-misses, and the full scored universe.
+- Lightweight explainability helpers for winner/near-miss inspection and symbol-vs-symbol comparison now live in [`src/research/explain.py`](/Users/y-yang/Developer/quant/src/research/explain.py).
+- The Backtrader multi-factor strategy in [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py) can now persist a scored-universe artifact for each rebalance, including factor contributions, winners, near-misses, and rebalance-date metadata.
+- Regression coverage for scorer-native explainability, artifact persistence, and reporting helpers lives in [`tests/scoring/test_multi_factor.py`](/Users/y-yang/Developer/quant/tests/scoring/test_multi_factor.py), [`tests/research/test_artifacts.py`](/Users/y-yang/Developer/quant/tests/research/test_artifacts.py), and [`tests/research/test_explain.py`](/Users/y-yang/Developer/quant/tests/research/test_explain.py).
+- Strategy-level rebalance artifact coverage now lives in [`tests/strategies/test_multi_factor_parity.py`](/Users/y-yang/Developer/quant/tests/strategies/test_multi_factor_parity.py).
 
 ### Milestone 4: Paper trader alignment with research pipeline
 
@@ -273,7 +280,7 @@ Milestone 6 closeout:
 
 ### Milestone 7: Better universe and portfolio research
 
-Status: not started.
+Status: in progress.
 
 Goal:
 
@@ -292,6 +299,19 @@ Acceptance criteria:
 - At least one benchmark comparison is available in reports.
 - Research output includes portfolio-level diagnostics beyond return alone.
 - Universe definition is explicit and reproducible for a given experiment.
+
+Completed so far:
+
+- Benchmark comparison is already available in walk-forward reporting through [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) and [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py).
+- Portfolio-level turnover diagnostics already flow through the strategy and backtest output via [`src/engine/runner.py`](/Users/y-yang/Developer/quant/src/engine/runner.py) and [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py).
+- Universe selection is now explicit and reproducible through the named registry in [`src/data/universe.py`](/Users/y-yang/Developer/quant/src/data/universe.py), the backtest CLI in [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py), and the optimizer CLI in [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py).
+- Research artifacts can now persist `universe_name` and `universe_symbols` metadata via [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py).
+
+Still missing for milestone closeout:
+
+- broader configured universes beyond the current small named set
+- richer portfolio diagnostics such as hit rate and contribution analysis
+- stronger research outputs around larger-universe behavior
 
 ### Milestone X: Research Platform Foundation
 
@@ -355,12 +375,16 @@ Completed so far:
 - Research Artifact Store in [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py)
 - Paper-signal integration through [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py)
 - Walk-forward orchestration and weight artifacts through [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py) and [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py)
+- Approved-parameter loading and operator approval flow through [`src/research/approved_params.py`](/Users/y-yang/Developer/quant/src/research/approved_params.py) and [`src/research/approve.py`](/Users/y-yang/Developer/quant/src/research/approve.py)
+- Explicit benchmark comparison output in walk-forward summaries through [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py)
+- Basic data validation for cached historical slices through [`src/research/data_validation.py`](/Users/y-yang/Developer/quant/src/research/data_validation.py) and [`src/data/bulk_loader.py`](/Users/y-yang/Developer/quant/src/data/bulk_loader.py)
+- Universe-governance foundations through named universe selection in [`src/data/universe.py`](/Users/y-yang/Developer/quant/src/data/universe.py) plus CLI and artifact wiring in [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py), [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py), and [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py)
 
 Next foundation slice:
 
-- Explicit approval and lifecycle controls on top of validated-parameter loading
-- Benchmark comparison output
-- Data validation and diagnostics
+- richer diagnostics such as hit rate, rank stability, and contribution analysis
+- explicit strategy lifecycle states on top of approved-parameter loading
+- broader universe governance beyond the initial named static registry
 
 Acceptance criteria:
 
@@ -443,6 +467,7 @@ Typical traits:
 - walk-forward outputs recorded
 - explicit benchmark comparisons
 - basic diagnostics and data validation
+- explicit, reproducible universe selection
 
 ### High Confidence
 
@@ -508,15 +533,17 @@ Scope:
 
 - Build Milestone 3 once the live and research paths are aligned.
 
+Status: complete.
+
 Definition of done:
 
 - For any rebalance date, we can explain why a stock was selected.
 
 Suggested implementation tasks:
 
-1. Persist factor inputs and weighted contributions per stock.
-2. Add a simple report or CLI view for winners and near-misses.
-3. Save outputs in a format that is easy to inspect later.
+1. Persist factor inputs and weighted contributions from the shared scorer.
+2. Save winner and near-miss evidence in durable artifacts.
+3. Make rebalance decisions inspectable from saved evidence without recomputing factor math.
 
 ### Phase 4: Reduce unnecessary trading
 
@@ -550,24 +577,25 @@ Suggested implementation tasks:
 2. Remove avoidable duplication in research and execution code paths.
 3. Add broader benchmark and portfolio analytics support.
 4. Expand universe definitions in a controlled, reproducible way.
+5. Deepen the data-validation layer beyond the current lightweight first pass.
 
 ## Recommended Immediate Next Task
 
-If we are starting implementation now, the best next task is Milestone 3 explainability output:
+If we are continuing implementation now, the best next task is to build on the now-complete explainability layer with richer diagnostics and broader research governance:
 
-1. Persist per-stock factor inputs and weighted contributions for each rebalance.
-2. Show selected winners alongside near-miss candidates from the same ranking run.
-3. Make the output easy to inspect later from saved artifacts or a lightweight CLI view.
+1. Add portfolio diagnostics such as hit rate, contribution analysis, and rank stability.
+2. Expand named universes in a controlled, reproducible way.
+3. Strengthen lifecycle-state and trust-reporting infrastructure on top of the saved artifacts.
 
-That turns aligned research and paper-trading decisions into decisions we can also explain and debug.
+That would turn the current explainable decision engine into one that is easier to compare, audit, and scale.
 
 ## Suggested Near-Term Order
 
 If we want the best sequence from here, the recommended order is:
 
-1. Add explainability output for each rebalance.
-2. Add turnover controls.
-3. Deepen tests.
+1. Add richer diagnostics on top of the new data-validation and explainability foundations.
+2. Expand named universes in a controlled, reproducible way.
+3. Strengthen lifecycle and trust-reporting infrastructure.
 
 That order improves decision quality first, then operational consistency, then safety and maintainability.
 
@@ -584,6 +612,10 @@ uv run python -m src.main --strategy multi --universe --no-plot
 ```
 
 ```bash
+uv run python -m src.main --strategy multi --universe-name topix_top_10 --no-plot
+```
+
+```bash
 uv run python -m src.optimize
 ```
 
@@ -591,7 +623,11 @@ uv run python -m src.optimize
 uv run python -m src.optimize --start 2024-01-04 --end 2025-12-30 --train-months 12 --validation-months 6 --step-months 6
 ```
 
-`src.optimize` now supports explicit CLI control over the research window and walk-forward settings. Its default research period is `2021-01-01` through `2024-01-01`, with a 12-month training window, 6-month validation window, and 6-month step size. It prints a summary that compares static default weights, one-shot optimized weights, and walk-forward weights. Walk-forward artifacts are written under `.research_artifacts/`. The newest run is not automatically treated as approved for paper trading. Instead, paper trading should use the approved params file at `.research_artifacts/paper_trade_params.json`, which points to a chosen validated parameter set.
+```bash
+uv run python -m src.optimize --universe-name topix_top_10 --start 2024-01-04 --end 2025-12-30 --train-months 12 --validation-months 6 --step-months 6
+```
+
+`src.optimize` now supports explicit CLI control over the research window, named universe selection, and walk-forward settings. Its default research period is `2021-01-01` through `2024-01-01`, with a 12-month training window, 6-month validation window, and 6-month step size. It prints a summary that compares static default weights, one-shot optimized weights, and walk-forward weights. Walk-forward artifacts are written under `.research_artifacts/` and can now persist `universe_name` and `universe_symbols` metadata. The newest run is not automatically treated as approved for paper trading. Instead, paper trading should use the approved params file at `.research_artifacts/paper_trade_params.json`, which points to a chosen validated parameter set.
 
 Operator approval flow:
 
@@ -622,6 +658,6 @@ uv run pytest -q
 
 - The current system is best understood as a research prototype with real momentum toward a more disciplined portfolio engine.
 - The strongest completed capability today is cross-sectional stock ranking and top-`N` portfolio selection.
-- The shared scoring core and experiment artifact foundation are now in place for paper-signal generation.
-- The highest-value next milestone is Milestone 3: making each rebalance decision explainable.
+- The shared scoring core and experiment artifact foundation are now in place, and the next platform slice has started to add explicit universe selection and basic data validation.
+- Milestone 3 explainability is now closed across paper-signal artifacts, saved scoring runs, and strategy-level rebalance artifacts.
 - Python dependencies are now managed through `uv` using [`pyproject.toml`](/Users/y-yang/Developer/quant/pyproject.toml) and `uv.lock`.
