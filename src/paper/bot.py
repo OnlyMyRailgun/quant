@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime
 from tabulate import tabulate
 
-from src.research.artifacts import build_scoring_metadata, write_scoring_run
+from src.research.artifacts import build_scoring_metadata, build_scoring_summary, write_scoring_run
 from src.research.approved_params import resolve_approved_weight_values
 from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_MOM,
@@ -121,12 +121,16 @@ def calculate_current_signals(
                 "rev": lookback_rev,
             },
         )
+        summary = build_scoring_summary(
+            scores=ranked,
+            top_n=top_n,
+        )
         write_scoring_run(
             base_dir=Path(artifact_dir),
             run_name="paper_signal",
             metadata=metadata,
             scores=ranked,
-            summary={"top_n": top_n, "winner_count": len(winners)},
+            summary=summary,
         )
 
     return _with_legacy_factor_aliases(ranked.head(top_n))

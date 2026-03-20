@@ -11,6 +11,7 @@ from src.research.registry import append_run_record, create_run_id
 
 DEFAULT_ARTIFACT_DIR = Path(".research_artifacts")
 DEFAULT_REGISTRY_FILE = DEFAULT_ARTIFACT_DIR / "registry.jsonl"
+DEFAULT_NEAR_MISS_COUNT = 3
 
 
 def _timestamp() -> str:
@@ -29,6 +30,27 @@ def build_scoring_metadata(
         "lookbacks": dict(lookbacks),
         "universe": scores["symbol"].tolist(),
     }
+
+
+def build_scoring_summary(
+    scores: pd.DataFrame,
+    top_n: int,
+    near_miss_count: int = DEFAULT_NEAR_MISS_COUNT,
+    extra_summary: dict | None = None,
+) -> dict:
+    winners = scores.head(top_n)["symbol"].tolist()
+    near_misses = scores.iloc[top_n : top_n + near_miss_count]["symbol"].tolist()
+
+    summary = {
+        "top_n": top_n,
+        "winner_count": len(winners),
+        "winners": winners,
+        "near_miss_count": len(near_misses),
+        "near_misses": near_misses,
+    }
+    if extra_summary:
+        summary.update(extra_summary)
+    return summary
 
 
 def write_scoring_run(

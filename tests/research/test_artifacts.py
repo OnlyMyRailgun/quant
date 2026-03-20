@@ -7,6 +7,7 @@ import pandas as pd
 from src.paper.bot import calculate_current_signals
 from src.research.artifacts import build_scoring_metadata, write_scoring_run
 from src.research.registry import append_run_record, create_run_id
+from src.scoring.multi_factor import score_universe
 
 
 def make_df(closes):
@@ -138,7 +139,16 @@ def test_paper_signal_run_can_write_artifacts(tmp_path: Path):
         "AAA.T": make_df([100] * 70 + list(range(100, 110)) + list(range(150, 130, -1))),
         "BBB.T": make_df([120] * 70 + list(range(120, 110, -1)) + [80] * 20),
         "CCC.T": make_df([100] * 100),
+        "DDD.T": make_df([90] * 70 + list(range(90, 96)) + [95] * 24),
+        "EEE.T": make_df([130] * 70 + list(range(130, 125, -1)) + [124] * 25),
     }
+    expected_ranked = score_universe(
+        data,
+        top_n=2,
+        weight_mom=1.5,
+        weight_vol=0.5,
+        weight_rev=2.0,
+    )
 
     winners = calculate_current_signals(
         data,
@@ -149,7 +159,7 @@ def test_paper_signal_run_can_write_artifacts(tmp_path: Path):
         artifact_dir=tmp_path,
     )
 
-    assert winners["symbol"].tolist() == ["AAA.T", "CCC.T"]
+    assert winners["symbol"].tolist() == ["AAA.T", "DDD.T"]
 
     run_root = tmp_path / "paper_signal"
     run_dirs = [path for path in run_root.iterdir() if path.is_dir()]
@@ -164,8 +174,16 @@ def test_paper_signal_run_can_write_artifacts(tmp_path: Path):
     assert metadata["weights"] == {"mom": 1.5, "vol": 0.5, "rev": 2.0}
     assert metadata["lookbacks"] == {"mom": 90, "vol": 20, "rev": 20}
     assert metadata["universe"] == scores["symbol"].tolist()
-    assert scores["symbol"].tolist() == ["AAA.T", "CCC.T", "BBB.T"]
-    assert summary == {"top_n": 2, "winner_count": 2}
+    assert scores["symbol"].tolist() == expected_ranked["symbol"].tolist()
+    for column in ("mom_contribution", "vol_contribution", "rev_contribution"):
+        assert column in scores.columns
+    assert summary == {
+        "near_miss_count": 3,
+        "near_misses": expected_ranked.iloc[2:5]["symbol"].tolist(),
+        "top_n": 2,
+        "winner_count": 2,
+        "winners": expected_ranked.head(2)["symbol"].tolist(),
+    }
 
     registry_lines = (tmp_path / "registry.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(registry_lines) == 1
