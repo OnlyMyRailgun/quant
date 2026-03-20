@@ -6,6 +6,7 @@ from datetime import datetime
 from tabulate import tabulate
 
 from src.research.artifacts import build_scoring_metadata, write_scoring_run
+from src.research.approved_params import load_approved_paper_trading_params
 from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_MOM,
     DEFAULT_LOOKBACK_REV,
@@ -15,6 +16,39 @@ from src.scoring.multi_factor import (
 from src.paper.db import DB_PATH, get_wallet_balance, place_pending_order
 from src.paper.notifier import send_daily_report
 import sqlite3
+
+
+DEFAULT_SIGNAL_WEIGHT_MOM = 1.0
+DEFAULT_SIGNAL_WEIGHT_VOL = 1.0
+DEFAULT_SIGNAL_WEIGHT_REV = 1.0
+
+
+def _resolve_signal_weights(
+    artifact_dir: Path | None,
+    weight_mom: float | None,
+    weight_vol: float | None,
+    weight_rev: float | None,
+) -> tuple[float, float, float]:
+    if weight_mom is not None and weight_vol is not None and weight_rev is not None:
+        return weight_mom, weight_vol, weight_rev
+
+    approved = None
+    if artifact_dir is not None:
+        approved = load_approved_paper_trading_params(Path(artifact_dir))
+
+    if approved is not None:
+        approved_weights = approved["weights"]
+        return (
+            float(approved_weights["mom"]) if weight_mom is None else weight_mom,
+            float(approved_weights["vol"]) if weight_vol is None else weight_vol,
+            float(approved_weights["rev"]) if weight_rev is None else weight_rev,
+        )
+
+    return (
+        DEFAULT_SIGNAL_WEIGHT_MOM if weight_mom is None else weight_mom,
+        DEFAULT_SIGNAL_WEIGHT_VOL if weight_vol is None else weight_vol,
+        DEFAULT_SIGNAL_WEIGHT_REV if weight_rev is None else weight_rev,
+    )
 
 
 def _build_signal_run(
@@ -51,9 +85,9 @@ def _with_legacy_factor_aliases(ranked: pd.DataFrame) -> pd.DataFrame:
 def calculate_current_signals(
     data_dfs,
     top_n=3,
-    weight_mom=1.0,
-    weight_vol=1.0,
-    weight_rev=1.0,
+    weight_mom: float | None = None,
+    weight_vol: float | None = None,
+    weight_rev: float | None = None,
     lookback_mom=DEFAULT_LOOKBACK_MOM,
     lookback_vol=DEFAULT_LOOKBACK_VOL,
     lookback_rev=DEFAULT_LOOKBACK_REV,
@@ -65,12 +99,19 @@ def calculate_current_signals(
     This delegates to the same ranking logic used by the research layer so
     paper-trading recommendations stay aligned with backtests.
     """
-    ranked = _build_signal_run(
-        data_dfs,
-        top_n=top_n,
+    resolved_weight_mom, resolved_weight_vol, resolved_weight_rev = _resolve_signal_weights(
+        artifact_dir=artifact_dir,
         weight_mom=weight_mom,
         weight_vol=weight_vol,
         weight_rev=weight_rev,
+    )
+
+    ranked = _build_signal_run(
+        data_dfs,
+        top_n=top_n,
+        weight_mom=resolved_weight_mom,
+        weight_vol=resolved_weight_vol,
+        weight_rev=resolved_weight_rev,
         lookback_mom=lookback_mom,
         lookback_vol=lookback_vol,
         lookback_rev=lookback_rev,
@@ -81,7 +122,7 @@ def calculate_current_signals(
         metadata = build_scoring_metadata(
             scores=ranked,
             top_n=top_n,
-            weights={"mom": weight_mom, "vol": weight_vol, "rev": weight_rev},
+            weights={"mom": resolved_weight_mom, "vol": resolved_weight_vol, "rev": resolved_weight_rev},
             lookbacks={
                 "mom": lookback_mom,
                 "vol": lookback_vol,

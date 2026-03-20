@@ -137,4 +137,5 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
         "window_count": 2,
         "baseline_return_pct": 2.2,
         "walk_forward_return_pct": 4.0,
+        "active_return_pct": 1.8,
     }

@@ -147,6 +147,7 @@ def run_walk_forward_experiment(
         "window_count": len(rows),
         "baseline_return_pct": round(baseline_total, 10),
         "walk_forward_return_pct": round(walk_forward_total, 10),
+        "active_return_pct": round(walk_forward_total - baseline_total, 10),
     }
     metadata = {
         "start": start,

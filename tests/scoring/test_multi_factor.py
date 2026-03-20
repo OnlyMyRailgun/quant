@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pandas as pd
 
 from src.paper.bot import calculate_current_signals
@@ -112,3 +115,42 @@ def test_calculate_current_signals_preserves_legacy_factor_aliases():
         assert legacy in winners.columns
         assert raw in winners.columns
         assert winners[legacy].tolist() == winners[raw].tolist()
+
+
+def test_calculate_current_signals_uses_approved_params_when_available(tmp_path: Path):
+    data = {
+        "AAA.T": make_df([100] * 70 + list(range(100, 110)) + list(range(150, 130, -1))),
+        "BBB.T": make_df([120] * 70 + list(range(120, 110, -1)) + [80] * 20),
+        "CCC.T": make_df([100] * 100),
+    }
+
+    (tmp_path / "paper_trade_params.json").write_text(
+        json.dumps(
+            {
+                "source_run_id": "wf-2",
+                "rebalance_date": "2022-07-01",
+                "weights": {"mom": 0.0, "vol": 1.0, "rev": 0.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    winners = calculate_current_signals(data, top_n=2, artifact_dir=tmp_path)
+    expected = score_universe(data, top_n=2, weight_mom=0.0, weight_vol=1.0, weight_rev=0.0).head(2)
+
+    assert winners["symbol"].tolist() == expected["symbol"].tolist()
+    assert winners["total_score"].tolist() == expected["total_score"].tolist()
+
+
+def test_calculate_current_signals_falls_back_when_no_approved_params_exist(tmp_path: Path):
+    data = {
+        "AAA.T": make_df([100] * 70 + list(range(100, 110)) + list(range(150, 130, -1))),
+        "BBB.T": make_df([120] * 70 + list(range(120, 110, -1)) + [80] * 20),
+        "CCC.T": make_df([100] * 100),
+    }
+
+    winners = calculate_current_signals(data, top_n=2, artifact_dir=tmp_path)
+    expected = score_universe(data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=1.0).head(2)
+
+    assert winners["symbol"].tolist() == expected["symbol"].tolist()
+    assert winners["total_score"].tolist() == expected["total_score"].tolist()

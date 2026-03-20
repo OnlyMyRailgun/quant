@@ -193,11 +193,12 @@ Completed so far:
 - [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) uses the shared scorer instead of maintaining a separate factor-math path.
 - Tests cover ranking parity between the shared scorer and paper-signal generation.
 - Walk-forward parameter artifacts can now be produced by [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py).
+- Approved paper-trading params can now be selected from qualified walk-forward runs and loaded by the paper trader by default.
 
 Remaining for milestone completion:
 
-- Load the latest validated walk-forward parameter set automatically.
-- Prove research/backtest and paper-trading paths share both scoring logic and parameter source.
+- Prove research/backtest and paper-trading paths share both scoring logic and parameter source end to end.
+- Add a more explicit operator-facing approval workflow if we want approvals managed outside Python helpers.
 
 ### Milestone 5: Turnover and risk controls
 
@@ -347,7 +348,7 @@ Completed so far:
 
 Next foundation slice:
 
-- Walk-forward optimization artifacts and validated-parameter loading
+- Explicit approval and lifecycle controls on top of validated-parameter loading
 - Benchmark comparison output
 - Data validation and diagnostics
 
@@ -373,7 +374,7 @@ Signals of improvement:
 
 - research and paper-trading ranking parity
 - reduced drift across execution paths
-- parameter usage that matches recorded artifacts
+- parameter usage that matches approved recorded artifacts
 
 ### 2. Reproducibility
 
@@ -576,6 +577,8 @@ uv run python -m src.main --strategy multi --universe --no-plot
 ```bash
 uv run python -m src.optimize
 ```
+
+Walk-forward artifacts are written under `.research_artifacts/`. The newest run is not automatically treated as approved for paper trading. Instead, paper trading should use the approved params file at `.research_artifacts/paper_trade_params.json`, which points to a chosen validated parameter set.
 
 ```bash
 uv run python -m src.paper.bot status
