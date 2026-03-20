@@ -3,7 +3,11 @@ import sys
 from typing import TextIO
 import backtrader as bt
 from src.data.bulk_loader import fetch_universe
-from src.data.universe import get_topix_top_10, get_universe
+from src.data.universe import (
+    format_unknown_universe_message,
+    get_topix_top_10,
+    get_universe,
+)
 from src.strategies.sma_crossover import SmaCross
 from src.strategies.momentum_factor import CrossSectionalMomentum
 from src.strategies.multi_factor import UniversalMultiFactor
@@ -192,7 +196,11 @@ def main():
     if args.ticker:
         symbols = [args.ticker]
     elif args.universe_name:
-        symbols = get_universe(args.universe_name)
+        try:
+            symbols = get_universe(args.universe_name)
+        except KeyError:
+            print(format_unknown_universe_message(args.universe_name))
+            sys.exit(1)
         selected_universe_name = args.universe_name
     elif args.universe:
         symbols = get_topix_top_10()

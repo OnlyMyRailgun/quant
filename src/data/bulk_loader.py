@@ -89,10 +89,12 @@ def fetch_universe(symbols: list[str], start_date: str, end_date: str) -> dict[s
             raw_df = pd.read_parquet(cache_file)
             df = _ensure_cache_covers_range(symbol, raw_df, start_date, end_date)
             if not df.empty:
-                df.to_parquet(cache_file)
                 sliced = _slice_requested_range(df, start_date, end_date)
                 validation = validate_price_frame(sliced)
                 if validation.is_valid:
+                    cache_validation = validate_price_frame(df)
+                    if cache_validation.is_valid:
+                        df.to_parquet(cache_file)
                     results[symbol] = _normalize_index(sliced)
                 else:
                     print(f"[SKIP] {symbol}: {', '.join(validation.issues)}")

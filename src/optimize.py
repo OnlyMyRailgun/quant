@@ -9,7 +9,11 @@ import backtrader as bt
 import pandas as pd
 
 from src.data.bulk_loader import fetch_universe
-from src.data.universe import get_topix_top_10, get_universe
+from src.data.universe import (
+    format_unknown_universe_message,
+    get_topix_top_10,
+    get_universe,
+)
 from src.engine.commission import JapanStockCommission
 from src.research.artifacts import DEFAULT_ARTIFACT_DIR, build_walk_forward_metadata, write_walk_forward_run
 from src.research.walk_forward import run_walk_forward_experiment
@@ -241,7 +245,11 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv if argv is not None else [])
     if args.universe_name:
-        symbols = get_universe(args.universe_name)
+        try:
+            symbols = get_universe(args.universe_name)
+        except KeyError:
+            print(format_unknown_universe_message(args.universe_name))
+            return 1
         universe_name = args.universe_name
     else:
         symbols = get_topix_top_10()

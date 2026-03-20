@@ -123,3 +123,34 @@ def test_fetch_universe_skips_invalid_symbols_and_reports_reason(mock_fetch, cap
     assert invalid_symbol not in dfs
     assert "INVALID.T" in captured.out
     assert "unsorted timestamps" in captured.out
+
+
+@patch('src.data.bulk_loader.fetch_daily_data')
+def test_fetch_universe_does_not_persist_invalid_refresh_data_on_cache_hit(mock_fetch, capsys):
+    symbol = "TEST_INVALID_REFRESH.T"
+    cache_path = CACHE_DIR / f"{symbol}.parquet"
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    cached_df = pd.DataFrame(
+        {"Close": [100.0, 101.0]},
+        index=pd.to_datetime(["2024-01-01", "2024-01-02"]),
+    )
+    cached_df.to_parquet(cache_path)
+
+    fetched_df = pd.DataFrame(
+        {"Close": [-1.0, 103.0]},
+        index=pd.to_datetime(["2024-01-03", "2024-01-04"]),
+    )
+    mock_fetch.return_value = fetched_df
+
+    dfs = fetch_universe([symbol], "2024-01-01", "2024-01-04")
+    captured = capsys.readouterr()
+
+    assert symbol not in dfs
+    assert "non-positive close values" in captured.out
+
+    persisted = pd.read_parquet(cache_path)
+    pd.testing.assert_frame_equal(persisted, cached_df)
+
+    if cache_path.exists():
+        cache_path.unlink()

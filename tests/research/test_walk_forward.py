@@ -392,6 +392,15 @@ def test_optimize_main_can_select_a_named_universe(monkeypatch):
     assert captured["run"]["universe_symbols"] == ["AAA.T", "BBB.T"]
 
 
+def test_optimize_main_rejects_unknown_named_universe_with_friendly_error(capsys):
+    exit_code = optimize.main(["--universe-name", "unknown_universe"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Invalid universe name: unknown_universe" in output
+    assert "Available universes: topix_top_10" in output
+
+
 def test_optimize_main_accepts_cli_overrides_for_window_parameters(monkeypatch):
     captured = {"fetch_calls": []}
 

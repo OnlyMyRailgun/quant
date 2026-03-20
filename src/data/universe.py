@@ -21,6 +21,11 @@ def list_universe_names() -> list[str]:
     return list(_UNIVERSES.keys())
 
 
+def format_unknown_universe_message(name: str) -> str:
+    available = ", ".join(list_universe_names())
+    return f"Invalid universe name: {name}. Available universes: {available}"
+
+
 def get_universe(name: str) -> list[str]:
     try:
         return list(_UNIVERSES[name])

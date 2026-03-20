@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+import pytest
 
 import src.main as main
 from src.main import resolve_multi_factor_strategy_kwargs, resolve_multi_factor_weights, render_backtest_results
@@ -267,3 +268,19 @@ def test_main_multi_factor_defaults_to_existing_small_ticker_list_when_no_univer
             "end": "2024-01-01",
         }
     ]
+
+
+def test_main_rejects_unknown_named_universe_with_friendly_error(monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["main.py", "--strategy", "multi", "--universe-name", "unknown_universe", "--no-plot"],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        main.main()
+
+    output = capsys.readouterr().out
+    assert excinfo.value.code == 1
+    assert "Invalid universe name: unknown_universe" in output
+    assert "Available universes: topix_top_10" in output
