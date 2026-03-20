@@ -34,6 +34,43 @@ DEFAULT_BENCHMARK_SYMBOLS = {
 }
 
 
+class SymbolReturnAnalyzer(bt.Analyzer):
+    def start(self):
+        self._starting_value = float(self.strategy.broker.getvalue())
+        self._realized_pnl_by_symbol: dict[str, float] = {}
+
+    def notify_trade(self, trade):
+        if not trade.isclosed:
+            return
+        symbol = trade.data._name if hasattr(trade.data, "_name") else "UNKNOWN"
+        self._realized_pnl_by_symbol[symbol] = (
+            self._realized_pnl_by_symbol.get(symbol, 0.0) + float(trade.pnlcomm)
+        )
+
+    def get_analysis(self):
+        rows: list[dict[str, float | str]] = []
+        seen_symbols = set(self._realized_pnl_by_symbol)
+
+        for data in self.strategy.datas:
+            symbol = data._name if hasattr(data, "_name") else "UNKNOWN"
+            position = self.strategy.getposition(data)
+            pnl = float(self._realized_pnl_by_symbol.get(symbol, 0.0))
+            if position.size:
+                seen_symbols.add(symbol)
+                pnl += float((data.close[0] - position.price) * position.size)
+
+            if symbol not in seen_symbols:
+                continue
+
+            return_pct = 0.0
+            if self._starting_value > 0.0:
+                return_pct = round((pnl / self._starting_value) * 100.0, 4)
+            rows.append({"symbol": symbol, "return_pct": return_pct})
+
+        rows.sort(key=lambda row: str(row["symbol"]))
+        return {"symbol_returns": rows}
+
+
 def suppress_output(strategy_class):
     """Temporarily suppress noisy strategy callbacks during optimization."""
     strategy_class.notify_order = lambda self, order: None
@@ -86,16 +123,19 @@ def evaluate_weight_tuple(
     cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
     cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe")
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
+    cerebro.addanalyzer(SymbolReturnAnalyzer, _name="symbol_returns")
 
     strategy = cerebro.run()[0]
     returns = strategy.analyzers.returns.get_analysis()
     sharpe = strategy.analyzers.sharpe.get_analysis().get("sharperatio")
     drawdown = strategy.analyzers.drawdown.get_analysis().get("max", {}).get("drawdown", 0.0)
+    symbol_returns = strategy.analyzers.symbol_returns.get_analysis().get("symbol_returns", [])
 
     return {
         "return_pct": round(returns.get("rtot", 0.0) * 100, 4),
         "sharpe": round(sharpe if sharpe is not None else 0.0, 4),
         "drawdown": round(drawdown, 4),
+        "symbol_returns": symbol_returns,
     }
 
 

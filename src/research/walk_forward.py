@@ -107,6 +107,37 @@ def aggregate_portfolio_diagnostics(
     }
 
 
+def aggregate_symbol_return_contributors(
+    window_symbol_returns: list[object],
+    contributor_count: int = DEFAULT_CONTRIBUTOR_COUNT,
+) -> dict[str, object]:
+    frames = [
+        _coerce_symbol_returns(symbol_returns)
+        for symbol_returns in window_symbol_returns
+    ]
+    frames = [frame for frame in frames if not frame.empty]
+    if not frames:
+        return {
+            "top_contributors": [],
+            "bottom_contributors": [],
+        }
+
+    frame = pd.concat(frames, ignore_index=True)
+    frame["return_pct"] = pd.to_numeric(frame["return_pct"], errors="coerce")
+    frame = frame.dropna(subset=["return_pct"])
+    if frame.empty:
+        return {
+            "top_contributors": [],
+            "bottom_contributors": [],
+        }
+
+    grouped = frame.groupby("symbol", as_index=False)["return_pct"].sum()
+    return {
+        "top_contributors": _sort_contributors(grouped, ascending=False, contributor_count=contributor_count),
+        "bottom_contributors": _sort_contributors(grouped, ascending=True, contributor_count=contributor_count),
+    }
+
+
 def build_walk_forward_windows(
     start: str,
     end: str,
@@ -214,6 +245,7 @@ def run_walk_forward_experiment(
     one_shot_best_weights: dict[str, float] | None = None
     benchmark_evaluators = evaluate_benchmark_windows or {}
     window_diagnostics: list[dict[str, object]] = []
+    window_symbol_returns: list[object] = []
 
     if evaluate_one_shot_training_window is not None:
         one_shot_leaderboard = select_best_weights(
@@ -263,8 +295,10 @@ def run_walk_forward_experiment(
             benchmark_returns[benchmark_name] = benchmark_return_pct
             benchmark_totals[benchmark_name] = benchmark_totals.get(benchmark_name, 0.0) + benchmark_return_pct
 
-        diagnostics = build_portfolio_diagnostics(validation_metrics.get("symbol_returns"))
+        symbol_returns = validation_metrics.get("symbol_returns")
+        diagnostics = build_portfolio_diagnostics(symbol_returns)
         window_diagnostics.append(diagnostics)
+        window_symbol_returns.append(symbol_returns)
 
         baseline_total += float(baseline_metrics["return_pct"])
         walk_forward_total += float(validation_metrics["return_pct"])
@@ -295,14 +329,15 @@ def run_walk_forward_experiment(
 
     weights = pd.DataFrame(rows)
     summary_diagnostics = aggregate_portfolio_diagnostics(window_diagnostics)
+    summary_contributors = aggregate_symbol_return_contributors(window_symbol_returns)
     summary = {
         "window_count": len(rows),
         "baseline_return_pct": round(baseline_total, 10),
         "walk_forward_return_pct": round(walk_forward_total, 10),
         "active_return_pct": round(walk_forward_total - baseline_total, 10),
         "avg_hit_rate": summary_diagnostics["avg_hit_rate"],
-        "top_contributors": summary_diagnostics["top_contributors"],
-        "bottom_contributors": summary_diagnostics["bottom_contributors"],
+        "top_contributors": summary_contributors["top_contributors"],
+        "bottom_contributors": summary_contributors["bottom_contributors"],
     }
     if one_shot_best_weights is not None:
         summary["one_shot_return_pct"] = round(one_shot_total, 10)

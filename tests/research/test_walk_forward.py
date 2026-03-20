@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import backtrader as bt
 import pandas as pd
 
 import src.optimize as optimize
@@ -94,6 +95,41 @@ def test_write_walk_forward_run_persists_weights_and_summary(tmp_path: Path):
     assert metadata["validation_months"] == 3
     assert saved_weights["rebalance_date"].tolist() == ["2021-07-01"]
     assert summary["walk_forward_return_pct"] == 3.1
+
+
+def test_evaluate_weight_tuple_returns_symbol_diagnostics_from_real_backtest_path(monkeypatch):
+    class BuyAndHoldBoth(bt.Strategy):
+        params = dict(weight_mom=1.0, weight_vol=1.0, weight_rev=1.0)
+
+        def __init__(self):
+            self._ordered = False
+
+        def next(self):
+            if self._ordered:
+                return
+            self._ordered = True
+            for data in self.datas:
+                self.order_target_percent(data=data, target=0.4)
+
+    monkeypatch.setattr(optimize, "UniversalMultiFactor", BuyAndHoldBoth)
+
+    data_dfs = {
+        "AAA.T": pd.DataFrame({"Close": [100.0, 110.0, 130.0]}, index=pd.date_range("2021-01-01", periods=3)),
+        "BBB.T": pd.DataFrame({"Close": [100.0, 95.0, 90.0]}, index=pd.date_range("2021-01-01", periods=3)),
+    }
+
+    metrics = optimize.evaluate_weight_tuple(
+        data_dfs=data_dfs,
+        start="2021-01-01",
+        end="2021-01-03",
+        weights=(1.0, 1.0, 1.0),
+    )
+
+    assert "symbol_returns" in metrics
+    assert metrics["symbol_returns"] == [
+        {"symbol": "AAA.T", "return_pct": 12.0},
+        {"symbol": "BBB.T", "return_pct": -4.0},
+    ]
 
 
 def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
@@ -226,6 +262,58 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
             {"symbol": "AAA.T", "return_pct": 3.5},
         ],
     }
+
+
+def test_run_walk_forward_experiment_aggregates_summary_contributors_from_full_symbol_returns():
+    weight_grid = [(1.0, 0.0, 0.0)]
+    validation_scores = {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+            "return_pct": 1.0,
+            "sharpe": 0.1,
+            "symbol_returns": [
+                {"symbol": "AAA.T", "return_pct": 7.0},
+                {"symbol": "BBB.T", "return_pct": 6.0},
+                {"symbol": "CCC.T", "return_pct": 5.0},
+                {"symbol": "DDD.T", "return_pct": 4.0},
+                {"symbol": "EEE.T", "return_pct": 3.0},
+                {"symbol": "FFF.T", "return_pct": 2.0},
+                {"symbol": "GGG.T", "return_pct": 1.0},
+            ],
+        },
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+            "return_pct": 1.0,
+            "sharpe": 0.1,
+            "symbol_returns": [
+                {"symbol": "AAA.T", "return_pct": 0.0},
+                {"symbol": "BBB.T", "return_pct": 0.0},
+                {"symbol": "CCC.T", "return_pct": 0.0},
+                {"symbol": "DDD.T", "return_pct": 4.0},
+                {"symbol": "EEE.T", "return_pct": 0.0},
+                {"symbol": "FFF.T", "return_pct": 0.0},
+                {"symbol": "GGG.T", "return_pct": 0.0},
+            ],
+        },
+    }
+
+    result = run_walk_forward_experiment(
+        start="2021-01-01",
+        end="2021-12-31",
+        train_months=6,
+        validation_months=3,
+        step_months=3,
+        weight_grid=weight_grid,
+        evaluate_training_window=lambda window, weights: {"return_pct": 1.0, "sharpe": 0.1},
+        evaluate_validation_window=lambda window, weights: validation_scores[
+            (window["validation_start"], window["validation_end"], weights)
+        ],
+        evaluate_baseline_window=lambda window: {"return_pct": 0.5, "sharpe": 0.05},
+    )
+
+    assert result["summary"]["top_contributors"] == [
+        {"symbol": "DDD.T", "return_pct": 8.0},
+        {"symbol": "AAA.T", "return_pct": 7.0},
+        {"symbol": "BBB.T", "return_pct": 6.0},
+    ]
 
 
 def test_run_walk_forward_optimization_prints_one_shot_comparison(monkeypatch, capsys):
