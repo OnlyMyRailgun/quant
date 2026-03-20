@@ -18,6 +18,10 @@ def _validate_close_series(df: pd.DataFrame) -> pd.Series:
     close = pd.to_numeric(df["Close"], errors="coerce").dropna()
     if close.empty:
         raise ValueError("Close series is empty after coercion")
+    if not pd.Series(close, dtype="float64").map(math.isfinite).all():
+        raise ValueError("Close series contains non-finite values")
+    if (close <= 0).any():
+        raise ValueError("Close series contains non-positive prices")
 
     return close
 
@@ -65,6 +69,10 @@ def _compute_factors(
     }
 
 
+def _has_only_finite_factors(factors: Mapping[str, float]) -> bool:
+    return all(math.isfinite(value) for value in factors.values())
+
+
 def score_universe(
     data_dfs: Mapping[str, pd.DataFrame],
     top_n: int = 3,
@@ -94,11 +102,18 @@ def score_universe(
         if df is None or df.empty:
             continue
 
-        close = _validate_close_series(df)
-        if len(close) < max(lookback_mom, lookback_vol, lookback_rev):
+        try:
+            close = _validate_close_series(df)
+        except (TypeError, ValueError):
+            continue
+
+        required_history = max(lookback_mom, lookback_vol, lookback_rev)
+        if len(close) < required_history:
             continue
 
         factors = _compute_factors(close, lookback_mom, lookback_vol, lookback_rev)
+        if not _has_only_finite_factors(factors):
+            continue
         raw_mom.append(factors["mom_raw"])
         raw_vol.append(factors["vol_raw"])
         raw_rev.append(factors["rev_raw"])

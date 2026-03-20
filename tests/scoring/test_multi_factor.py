@@ -45,6 +45,43 @@ def test_score_universe_handles_constant_cross_section_without_nan_scores():
     assert result[["mom_z", "vol_z", "rev_z"]].isna().sum().sum() == 0
 
 
+def test_score_universe_skips_symbols_with_zero_or_negative_prices():
+    data = {
+        "AAA.T": make_df([100] * 100),
+        "ZERO.T": make_df([100] * 99 + [0]),
+        "NEG.T": make_df([100] * 99 + [-1]),
+    }
+
+    result = score_universe(data)
+
+    assert result["symbol"].tolist() == ["AAA.T"]
+    assert result["rank"].tolist() == [1]
+
+
+def test_score_universe_skips_symbols_with_non_finite_factor_outputs():
+    explosive = [100] * 79 + [0] + [100] * 20
+    data = {
+        "AAA.T": make_df([100] * 100),
+        "INF.T": make_df(explosive),
+    }
+
+    result = score_universe(data)
+
+    assert result["symbol"].tolist() == ["AAA.T"]
+    assert result["total_score"].tolist() == [0.0]
+
+
+def test_score_universe_returns_empty_when_all_symbols_are_invalid():
+    data = {
+        "ZERO.T": make_df([100] * 99 + [0]),
+        "NEG.T": make_df([100] * 99 + [-1]),
+    }
+
+    result = score_universe(data)
+
+    assert result.empty
+
+
 # Task 3 paper-trading integration coverage lives here so the pure scorer
 # expectations above stay focused on the shared scoring module itself.
 def test_paper_signal_generation_matches_shared_scoring():
