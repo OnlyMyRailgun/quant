@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime
 from tabulate import tabulate
 
-from src.research.artifacts import build_scoring_metadata, build_scoring_summary, write_scoring_run
+from src.research.artifacts import DEFAULT_ARTIFACT_DIR, build_scoring_metadata, build_scoring_summary, write_scoring_run
 from src.research.approved_params import resolve_approved_weight_values
 from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_MOM,
@@ -148,7 +148,7 @@ def generate_rebalance_orders():
     dfs = fetch_universe(symbols, start_date, end_date)
     
     print("\nRunning UniversalMultiFactor Scoring Engine on Latest Close...")
-    winners = calculate_current_signals(dfs, top_n=3)
+    winners = calculate_current_signals(dfs, top_n=3, artifact_dir=DEFAULT_ARTIFACT_DIR)
     
     print("\n🏆 TODAY'S WINNING PORTFOLIO:")
     print(tabulate(winners[['symbol', 'price', 'total_score']], headers='keys', tablefmt='psql', showindex=False))

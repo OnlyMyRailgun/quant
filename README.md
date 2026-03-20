@@ -7,7 +7,7 @@ Today, the project can:
 - Fetch and cache a small stock universe from Yahoo Finance.
 - Run Backtrader-based backtests across multiple stocks.
 - Rank stocks with cross-sectional factor strategies.
-- Optimize factor weights with a basic in-sample vs out-of-sample workflow.
+- Optimize factor weights with a rolling walk-forward workflow that includes benchmark comparisons and portfolio diagnostics.
 - Generate paper-trading rebalance orders from the current signal engine.
 
 The current default idea is:
@@ -42,7 +42,7 @@ The project has already moved beyond a single-stock toy strategy and now support
   - [`src/engine/commission.py`](/Users/y-yang/Developer/quant/src/engine/commission.py) models commissions and slippage assumptions.
 
 - Optimization
-  - [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) runs a grid search over factor weights and performs a simple anti-overfitting check using one in-sample and one out-of-sample split.
+  - [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) runs a rolling walk-forward search over factor weights and reports benchmark comparisons plus portfolio diagnostics.
 
 - Paper trading
   - [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) generates live rebalance orders from the latest data.
@@ -50,7 +50,7 @@ The project has already moved beyond a single-stock toy strategy and now support
   - [`src/paper/notifier.py`](/Users/y-yang/Developer/quant/src/paper/notifier.py) sends daily summaries.
 
 - Tests
-  - Basic tests exist under [`tests/`](/Users/y-yang/Developer/quant/tests), but coverage is still minimal and mostly validates initialization and simple utility behavior.
+  - Tests now cover scoring, diagnostics, walk-forward artifacts, approval flow, and strategy parity, but the overall suite is still smaller than the roadmap would need for a production system.
 
 ### What the current strategy does
 
@@ -73,7 +73,7 @@ Main gaps:
 
 - Data validation now exists as a basic first layer, but it is still lightweight and does not yet cover richer cache-quality or coverage diagnostics.
 - Universe governance is now explicit and reproducible, but the configured universes are still small and static.
-- Portfolio diagnostics beyond return and simple turnover metrics remain limited.
+- Portfolio diagnostics now include hit rate and contributor summaries in walk-forward output, but they still need to broaden for larger-universe analysis.
 - The project still needs stronger lifecycle and trust diagnostics before it should be treated as a high-confidence decision engine.
 
 ## Planned Milestones
@@ -122,8 +122,8 @@ Completed so far:
 - [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) now runs a rolling walk-forward workflow instead of only a one-shot IS/OOS script.
 - Rolling train and validation window construction lives in [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py).
 - Walk-forward runs persist per-rebalance weights and summary artifacts under `.research_artifacts/`.
-- The walk-forward workflow now reports static default, one-shot optimized, and walk-forward return comparisons in the same run summary.
-- Regression coverage for walk-forward windowing, weight selection, artifact writing, and runner output lives in [`tests/research/test_walk_forward.py`](/Users/y-yang/Developer/quant/tests/research/test_walk_forward.py).
+- The walk-forward workflow now reports static default, one-shot optimized, and walk-forward return comparisons, plus average hit rate and top/bottom contributor summaries, in the same run summary.
+- Regression coverage for walk-forward windowing, weight selection, artifact writing, summary diagnostics, and runner output lives in [`tests/research/test_walk_forward.py`](/Users/y-yang/Developer/quant/tests/research/test_walk_forward.py) and [`tests/research/test_diagnostics.py`](/Users/y-yang/Developer/quant/tests/research/test_diagnostics.py).
 - Determinism-oriented regression coverage and artifact-loading ergonomics for downstream consumers are now covered by the research test suite.
 
 ### Milestone 3: Explainable stock selection
@@ -265,6 +265,7 @@ Completed so far:
 
 - Shared scoring behavior is covered in [`tests/scoring/test_multi_factor.py`](/Users/y-yang/Developer/quant/tests/scoring/test_multi_factor.py).
 - Artifact writing and registry behavior are covered in [`tests/research/test_artifacts.py`](/Users/y-yang/Developer/quant/tests/research/test_artifacts.py).
+- Portfolio diagnostics, including hit rate and contributor summaries, are covered in [`tests/research/test_diagnostics.py`](/Users/y-yang/Developer/quant/tests/research/test_diagnostics.py).
 - Paper-signal parity with the shared scorer is covered at the unit-test level.
 - Walk-forward runner behavior and artifact shape are covered in [`tests/research/test_walk_forward.py`](/Users/y-yang/Developer/quant/tests/research/test_walk_forward.py).
 - Rebalance behavior now has a no-op regression for non-rankable universes in [`tests/strategies/test_multi_factor_parity.py`](/Users/y-yang/Developer/quant/tests/strategies/test_multi_factor_parity.py).
@@ -304,13 +305,13 @@ Completed so far:
 
 - Benchmark comparison is already available in walk-forward reporting through [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) and [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py).
 - Portfolio-level turnover diagnostics already flow through the strategy and backtest output via [`src/engine/runner.py`](/Users/y-yang/Developer/quant/src/engine/runner.py) and [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py).
+- Walk-forward research output now includes portfolio-level hit-rate summaries and top/bottom contributor summaries alongside return comparisons.
 - Universe selection is now explicit and reproducible through the named registry in [`src/data/universe.py`](/Users/y-yang/Developer/quant/src/data/universe.py), the backtest CLI in [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py), and the optimizer CLI in [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py).
 - Research artifacts can now persist `universe_name` and `universe_symbols` metadata via [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py).
 
 Still missing for milestone closeout:
 
 - broader configured universes beyond the current small named set
-- richer portfolio diagnostics such as hit rate and contribution analysis
 - stronger research outputs around larger-universe behavior
 
 ### Milestone X: Research Platform Foundation
@@ -345,7 +346,7 @@ Core components:
 - Data Validation Layer
   - Checks for missing data, duplicate rows, date coverage, cache quality, and other silent data issues.
 - Diagnostics Layer
-  - Metrics such as turnover, rank stability, holding period, hit rate, and factor spread behavior.
+  - Metrics such as turnover, hit rate summaries, contributor summaries, rank stability, holding period, and factor spread behavior.
 - Portfolio Construction Layer
   - A clear portfolio-building step that can evolve beyond equal weight top-`N`.
 - Calendar and Rebalance Policy
@@ -382,7 +383,7 @@ Completed so far:
 
 Next foundation slice:
 
-- richer diagnostics such as hit rate, rank stability, and contribution analysis
+- richer diagnostics beyond the current hit-rate and contributor summaries, such as rank stability and factor spread analysis
 - explicit strategy lifecycle states on top of approved-parameter loading
 - broader universe governance beyond the initial named static registry
 
@@ -627,7 +628,7 @@ uv run python -m src.optimize --start 2024-01-04 --end 2025-12-30 --train-months
 uv run python -m src.optimize --universe-name topix_top_10 --start 2024-01-04 --end 2025-12-30 --train-months 12 --validation-months 6 --step-months 6
 ```
 
-`src.optimize` now supports explicit CLI control over the research window, named universe selection, and walk-forward settings. Its default research period is `2021-01-01` through `2024-01-01`, with a 12-month training window, 6-month validation window, and 6-month step size. It prints a summary that compares static default weights, one-shot optimized weights, and walk-forward weights. Walk-forward artifacts are written under `.research_artifacts/` and can now persist `universe_name` and `universe_symbols` metadata. The newest run is not automatically treated as approved for paper trading. Instead, paper trading should use the approved params file at `.research_artifacts/paper_trade_params.json`, which points to a chosen validated parameter set.
+`src.optimize` now supports explicit CLI control over the research window, named universe selection, and walk-forward settings. Its default research period is `2021-01-01` through `2024-01-01`, with a 12-month training window, 6-month validation window, and 6-month step size. It prints a summary that compares static default weights, one-shot optimized weights, and walk-forward weights, along with average hit rate and contributor summaries when available. Walk-forward artifacts are written under `.research_artifacts/` and can now persist `universe_name` and `universe_symbols` metadata. The newest run is not automatically treated as approved for paper trading. Instead, paper trading should use the approved params file at `.research_artifacts/paper_trade_params.json`, which points to a chosen validated parameter set.
 
 Operator approval flow:
 
