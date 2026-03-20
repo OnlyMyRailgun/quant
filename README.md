@@ -307,11 +307,11 @@ Completed so far:
 - Portfolio-level turnover diagnostics already flow through the strategy and backtest output via [`src/engine/runner.py`](/Users/y-yang/Developer/quant/src/engine/runner.py) and [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py).
 - Walk-forward research output now includes portfolio-level hit-rate summaries and top/bottom contributor summaries alongside return comparisons.
 - Universe selection is now explicit and reproducible through the named registry in [`src/data/universe.py`](/Users/y-yang/Developer/quant/src/data/universe.py), the backtest CLI in [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py), and the optimizer CLI in [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py).
+- The named registry now includes two larger curated Japanese equity universes for Milestone 7 research.
 - Research artifacts can now persist `universe_name` and `universe_symbols` metadata via [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py).
 
 Still missing for milestone closeout:
 
-- broader configured universes beyond the current small named set
 - stronger research outputs around larger-universe behavior
 
 ### Milestone X: Research Platform Foundation
