@@ -97,6 +97,7 @@ def run_walk_forward_experiment(
     evaluate_baseline_window,
     evaluate_one_shot_training_window=None,
     evaluate_one_shot_validation_window=None,
+    evaluate_benchmark_windows=None,
     artifact_dir=None,
 ) -> dict[str, object]:
     windows = build_walk_forward_windows(
@@ -111,7 +112,9 @@ def run_walk_forward_experiment(
     baseline_total = 0.0
     one_shot_total = 0.0
     walk_forward_total = 0.0
+    benchmark_totals: dict[str, float] = {}
     one_shot_best_weights: dict[str, float] | None = None
+    benchmark_evaluators = evaluate_benchmark_windows or {}
 
     if evaluate_one_shot_training_window is not None:
         one_shot_leaderboard = select_best_weights(
@@ -134,6 +137,7 @@ def run_walk_forward_experiment(
         validation_metrics = evaluate_validation_window(window, weight_tuple)
         baseline_metrics = evaluate_baseline_window(window)
         one_shot_return_pct = None
+        benchmark_returns: dict[str, float] = {}
 
         if one_shot_best_weights is not None:
             if evaluate_one_shot_validation_window is None:
@@ -154,6 +158,12 @@ def run_walk_forward_experiment(
             one_shot_return_pct = float(one_shot_metrics["return_pct"])
             one_shot_total += one_shot_return_pct
 
+        for benchmark_name, evaluator in benchmark_evaluators.items():
+            benchmark_metrics = evaluator(window)
+            benchmark_return_pct = float(benchmark_metrics["return_pct"])
+            benchmark_returns[benchmark_name] = benchmark_return_pct
+            benchmark_totals[benchmark_name] = benchmark_totals.get(benchmark_name, 0.0) + benchmark_return_pct
+
         baseline_total += float(baseline_metrics["return_pct"])
         walk_forward_total += float(validation_metrics["return_pct"])
 
@@ -171,6 +181,10 @@ def run_walk_forward_experiment(
                 "validation_return_pct": float(validation_metrics["return_pct"]),
                 "baseline_return_pct": float(baseline_metrics["return_pct"]),
                 "one_shot_return_pct": one_shot_return_pct,
+                **{
+                    f"{benchmark_name}_return_pct": benchmark_return_pct
+                    for benchmark_name, benchmark_return_pct in benchmark_returns.items()
+                },
             }
         )
 
@@ -184,6 +198,12 @@ def run_walk_forward_experiment(
     if one_shot_best_weights is not None:
         summary["one_shot_return_pct"] = round(one_shot_total, 10)
         summary["one_shot_active_return_pct"] = round(one_shot_total - baseline_total, 10)
+    for benchmark_name, benchmark_total in benchmark_totals.items():
+        summary[f"{benchmark_name}_return_pct"] = round(benchmark_total, 10)
+        summary[f"walk_forward_excess_vs_{benchmark_name}_pct"] = round(
+            walk_forward_total - benchmark_total,
+            10,
+        )
     metadata = {
         "start": start,
         "end": end,

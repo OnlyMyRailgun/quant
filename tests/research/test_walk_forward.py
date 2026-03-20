@@ -121,6 +121,14 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
         ("2021-07-01", "2021-09-30", one_shot_weights): {"return_pct": 1.8, "sharpe": 0.18},
         ("2021-10-01", "2021-12-31", one_shot_weights): {"return_pct": 1.4, "sharpe": 0.14},
     }
+    benchmark_topx_scores = {
+        ("2021-07-01", "2021-09-30"): {"return_pct": 0.8},
+        ("2021-10-01", "2021-12-31"): {"return_pct": 1.1},
+    }
+    benchmark_n225_scores = {
+        ("2021-07-01", "2021-09-30"): {"return_pct": 0.5},
+        ("2021-10-01", "2021-12-31"): {"return_pct": 1.6},
+    }
 
     result = run_walk_forward_experiment(
         start="2021-01-01",
@@ -144,12 +152,22 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
         evaluate_one_shot_validation_window=lambda window, weights: one_shot_validation_scores[
             (window["validation_start"], window["validation_end"], weights)
         ],
+        evaluate_benchmark_windows={
+            "topx": lambda window: benchmark_topx_scores[
+                (window["validation_start"], window["validation_end"])
+            ],
+            "n225": lambda window: benchmark_n225_scores[
+                (window["validation_start"], window["validation_end"])
+            ],
+        },
     )
 
     assert result["weights"]["rebalance_date"].tolist() == ["2021-07-01", "2021-10-01"]
     assert result["weights"]["weight_mom"].tolist() == [1.0, 0.0]
     assert result["weights"]["weight_vol"].tolist() == [0.0, 1.0]
     assert result["weights"]["one_shot_return_pct"].tolist() == [1.8, 1.4]
+    assert result["weights"]["topx_return_pct"].tolist() == [0.8, 1.1]
+    assert result["weights"]["n225_return_pct"].tolist() == [0.5, 1.6]
     assert result["summary"] == {
         "window_count": 2,
         "baseline_return_pct": 2.2,
@@ -157,6 +175,10 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
         "walk_forward_return_pct": 4.0,
         "one_shot_active_return_pct": 1.0,
         "active_return_pct": 1.8,
+        "topx_return_pct": 1.9,
+        "n225_return_pct": 2.1,
+        "walk_forward_excess_vs_topx_pct": 2.1,
+        "walk_forward_excess_vs_n225_pct": 1.9,
     }
 
 
@@ -183,6 +205,10 @@ def test_run_walk_forward_optimization_prints_one_shot_comparison(monkeypatch, c
                 "walk_forward_return_pct": 1.8,
                 "one_shot_active_return_pct": 0.4,
                 "active_return_pct": 0.8,
+                "topx_return_pct": 0.9,
+                "n225_return_pct": 1.1,
+                "walk_forward_excess_vs_topx_pct": 0.9,
+                "walk_forward_excess_vs_n225_pct": 0.7,
             },
         }
 
@@ -201,6 +227,8 @@ def test_run_walk_forward_optimization_prints_one_shot_comparison(monkeypatch, c
     output = capsys.readouterr().out
     assert "One-shot optimized return total %" in output
     assert "Walk-forward return total %" in output
+    assert "TOPX benchmark return total %" in output
+    assert "N225 benchmark return total %" in output
 
 
 def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator(
@@ -280,17 +308,22 @@ def test_optimize_main_prints_friendly_error_when_walk_forward_run_fails(monkeyp
 
 
 def test_optimize_main_uses_default_research_window_and_cli_defaults(monkeypatch):
-    captured = {}
+    captured = {"fetch_calls": []}
 
     monkeypatch.setattr(optimize, "get_topix_top_10", lambda: ["AAA.T"])
 
     def fake_fetch_universe(symbols, start, end):
-        captured["fetch"] = {
+        captured["fetch_calls"].append({
             "symbols": symbols,
             "start": start,
             "end": end,
+        })
+        if symbols == ["AAA.T"]:
+            return {"AAA.T": pd.DataFrame()}
+        return {
+            "1306.T": pd.DataFrame(),
+            "1321.T": pd.DataFrame(),
         }
-        return {"AAA.T": pd.DataFrame()}
 
     def fake_run_walk_forward_optimization(**kwargs):
         captured["run"] = kwargs
@@ -302,27 +335,37 @@ def test_optimize_main_uses_default_research_window_and_cli_defaults(monkeypatch
     exit_code = optimize.main([])
 
     assert exit_code == 0
-    assert captured["fetch"]["start"] == "2021-01-01"
-    assert captured["fetch"]["end"] == "2024-01-01"
+    assert captured["fetch_calls"][0]["symbols"] == ["AAA.T"]
+    assert captured["fetch_calls"][0]["start"] == "2021-01-01"
+    assert captured["fetch_calls"][0]["end"] == "2024-01-01"
+    assert captured["fetch_calls"][1]["symbols"] == ["1306.T", "1321.T"]
+    assert captured["fetch_calls"][1]["start"] == "2021-01-01"
+    assert captured["fetch_calls"][1]["end"] == "2024-01-01"
     assert captured["run"]["start"] == "2021-01-01"
     assert captured["run"]["end"] == "2024-01-01"
     assert captured["run"]["train_months"] == 12
     assert captured["run"]["validation_months"] == 6
     assert captured["run"]["step_months"] == 6
+    assert set(captured["run"]["benchmark_data_dfs"]) == {"topx", "n225"}
 
 
 def test_optimize_main_accepts_cli_overrides_for_window_parameters(monkeypatch):
-    captured = {}
+    captured = {"fetch_calls": []}
 
     monkeypatch.setattr(optimize, "get_topix_top_10", lambda: ["AAA.T"])
 
     def fake_fetch_universe(symbols, start, end):
-        captured["fetch"] = {
+        captured["fetch_calls"].append({
             "symbols": symbols,
             "start": start,
             "end": end,
+        })
+        if symbols == ["AAA.T"]:
+            return {"AAA.T": pd.DataFrame()}
+        return {
+            "1306.T": pd.DataFrame(),
+            "1321.T": pd.DataFrame(),
         }
-        return {"AAA.T": pd.DataFrame()}
 
     def fake_run_walk_forward_optimization(**kwargs):
         captured["run"] = kwargs
@@ -349,11 +392,75 @@ def test_optimize_main_accepts_cli_overrides_for_window_parameters(monkeypatch):
     )
 
     assert exit_code == 0
-    assert captured["fetch"]["start"] == "2024-01-04"
-    assert captured["fetch"]["end"] == "2025-12-30"
+    assert captured["fetch_calls"][0]["start"] == "2024-01-04"
+    assert captured["fetch_calls"][0]["end"] == "2025-12-30"
+    assert captured["fetch_calls"][1]["symbols"] == ["1306.T", "1321.T"]
+    assert captured["fetch_calls"][1]["start"] == "2024-01-04"
+    assert captured["fetch_calls"][1]["end"] == "2025-12-30"
     assert captured["run"]["start"] == "2024-01-04"
     assert captured["run"]["end"] == "2025-12-30"
     assert captured["run"]["train_months"] == 9
     assert captured["run"]["validation_months"] == 3
     assert captured["run"]["step_months"] == 3
     assert str(captured["run"]["artifact_dir"]) == "/tmp/custom-artifacts"
+
+
+def test_run_walk_forward_optimization_passes_benchmark_evaluators(monkeypatch):
+    captured = {}
+
+    def fake_run_walk_forward_experiment(**kwargs):
+        captured["kwargs"] = kwargs
+        return {
+            "weights": pd.DataFrame(),
+            "summary": {
+                "window_count": 0,
+                "baseline_return_pct": 0.0,
+                "walk_forward_return_pct": 0.0,
+            },
+        }
+
+    monkeypatch.setattr(optimize, "run_walk_forward_experiment", fake_run_walk_forward_experiment)
+
+    result = optimize.run_walk_forward_optimization(
+        data_dfs={},
+        start="2021-01-01",
+        end="2021-12-31",
+        artifact_dir=None,
+        benchmark_data_dfs={
+            "topx": pd.DataFrame({"Close": [100, 101]}, index=pd.to_datetime(["2021-07-01", "2021-12-31"])),
+            "n225": pd.DataFrame({"Close": [200, 210]}, index=pd.to_datetime(["2021-07-01", "2021-12-31"])),
+        },
+    )
+
+    assert result["summary"]["window_count"] == 0
+    assert set(captured["kwargs"]["evaluate_benchmark_windows"]) == {"topx", "n225"}
+
+
+def test_optimize_main_continues_when_benchmark_fetch_fails(monkeypatch, capsys):
+    monkeypatch.setattr(optimize, "get_topix_top_10", lambda: ["AAA.T"])
+
+    def fake_fetch_universe(symbols, start, end):
+        del start, end
+        if symbols == ["AAA.T"]:
+            return {"AAA.T": pd.DataFrame()}
+        raise RuntimeError("benchmark source unavailable")
+
+    def fake_run_walk_forward_optimization(**kwargs):
+        return {
+            "weights": pd.DataFrame(),
+            "summary": {
+                "window_count": 0,
+                "baseline_return_pct": 0.0,
+                "walk_forward_return_pct": 0.0,
+            },
+            "captured_benchmarks": kwargs["benchmark_data_dfs"],
+        }
+
+    monkeypatch.setattr(optimize, "fetch_universe", fake_fetch_universe)
+    monkeypatch.setattr(optimize, "run_walk_forward_optimization", fake_run_walk_forward_optimization)
+
+    exit_code = optimize.main([])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Benchmark data fetch skipped:" in output

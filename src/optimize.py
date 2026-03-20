@@ -24,6 +24,10 @@ DEFAULT_OPTIMIZE_END = "2024-01-01"
 DEFAULT_TRAIN_MONTHS = 12
 DEFAULT_VALIDATION_MONTHS = 6
 DEFAULT_STEP_MONTHS = 6
+DEFAULT_BENCHMARK_SYMBOLS = {
+    "topx": "1306.T",
+    "n225": "1321.T",
+}
 
 
 def suppress_output(strategy_class):
@@ -91,6 +95,23 @@ def evaluate_weight_tuple(
     }
 
 
+def evaluate_benchmark_return(
+    benchmark_df: pd.DataFrame,
+    start: str,
+    end: str,
+) -> dict[str, float]:
+    window_df = benchmark_df.loc[start:end]
+    if window_df.empty or "Close" not in window_df.columns or len(window_df) < 2:
+        return {"return_pct": 0.0}
+
+    start_price = float(window_df["Close"].iloc[0])
+    end_price = float(window_df["Close"].iloc[-1])
+    if start_price <= 0.0:
+        return {"return_pct": 0.0}
+
+    return {"return_pct": round(((end_price / start_price) - 1.0) * 100, 4)}
+
+
 def run_walk_forward_optimization(
     data_dfs: dict[str, pd.DataFrame],
     start: str,
@@ -99,7 +120,21 @@ def run_walk_forward_optimization(
     validation_months: int = 3,
     step_months: int = 3,
     artifact_dir: Path | None = DEFAULT_ARTIFACT_DIR,
+    benchmark_data_dfs: dict[str, pd.DataFrame] | None = None,
 ) -> dict[str, object]:
+    benchmark_evaluators = None
+    if benchmark_data_dfs:
+        benchmark_evaluators = {
+            benchmark_name: (
+                lambda window, benchmark_df=benchmark_df: evaluate_benchmark_return(
+                    benchmark_df,
+                    window["validation_start"],
+                    window["validation_end"],
+                )
+            )
+            for benchmark_name, benchmark_df in benchmark_data_dfs.items()
+        }
+
     result = run_walk_forward_experiment(
         start=start,
         end=end,
@@ -137,6 +172,7 @@ def run_walk_forward_optimization(
             window["validation_end"],
             weights,
         ),
+        evaluate_benchmark_windows=benchmark_evaluators,
         artifact_dir=Path(artifact_dir) if artifact_dir is not None else None,
     )
 
@@ -152,6 +188,12 @@ def run_walk_forward_optimization(
     print(f"Static baseline return total % : {summary['baseline_return_pct']:.4f}")
     if "one_shot_return_pct" in summary:
         print(f"One-shot optimized return total % : {summary['one_shot_return_pct']:.4f}")
+    if "topx_return_pct" in summary:
+        print(f"TOPX benchmark return total % : {summary['topx_return_pct']:.4f}")
+        print(f"Walk-forward excess vs TOPX % : {summary['walk_forward_excess_vs_topx_pct']:.4f}")
+    if "n225_return_pct" in summary:
+        print(f"N225 benchmark return total % : {summary['n225_return_pct']:.4f}")
+        print(f"Walk-forward excess vs N225 % : {summary['walk_forward_excess_vs_n225_pct']:.4f}")
     print(f"Walk-forward return total %    : {summary['walk_forward_return_pct']:.4f}")
     if "artifacts" in result:
         print(f"Artifacts written to           : {result['artifacts']['run_dir']}")
@@ -189,6 +231,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Data fetch failed: {exc}")
         return 1
 
+    benchmark_data_dfs = {}
+    try:
+        benchmark_data_dfs = fetch_universe(list(DEFAULT_BENCHMARK_SYMBOLS.values()), args.start, args.end)
+    except Exception as exc:
+        print(f"Benchmark data fetch skipped: {exc}")
+
     try:
         run_walk_forward_optimization(
             data_dfs=data_dfs,
@@ -198,6 +246,11 @@ def main(argv: list[str] | None = None) -> int:
             validation_months=args.validation_months,
             step_months=args.step_months,
             artifact_dir=args.artifact_dir,
+            benchmark_data_dfs={
+                benchmark_name: benchmark_data_dfs[symbol]
+                for benchmark_name, symbol in DEFAULT_BENCHMARK_SYMBOLS.items()
+                if symbol in benchmark_data_dfs
+            },
         )
     except Exception as exc:
         print(f"Walk-forward optimization failed: {exc}")
