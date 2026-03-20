@@ -1,401 +1,100 @@
 # Quant
 
-This repository is a small quantitative trading research and paper-trading project focused on Japanese equities.
+This repository is a Japanese equities research and paper-trading project.
 
-Today, the project can:
+It is currently a research prototype that can score a small universe, run walk-forward backtests, persist research artifacts, and generate paper-trading rebalance orders from approved parameters.
 
-- Fetch and cache a small stock universe from Yahoo Finance.
-- Run Backtrader-based backtests across multiple stocks.
-- Rank stocks with cross-sectional factor strategies.
-- Optimize factor weights with a rolling walk-forward workflow that includes benchmark comparisons, universe participation diagnostics, and artifact persistence.
-- Generate paper-trading rebalance orders from the current signal engine, using approved research parameters by default.
+Today, the system can:
+
+- fetch and cache named stock universes from Yahoo Finance
+- rank stocks cross-sectionally with a shared multi-factor scorer
+- run Backtrader portfolio backtests with commission and slippage assumptions
+- optimize factor weights with a rolling walk-forward workflow
+- persist scored-universe and experiment artifacts for later inspection
+- generate paper-trading orders from the same approved research path
+
+## Strategy At a Glance
 
 The current default idea is:
 
-1. Score each stock in the universe.
+1. Score each stock in the configured universe.
 2. Rank the stocks cross-sectionally.
 3. Buy the top `N` names.
 4. Rebalance periodically.
 
-## Current Situation
-
-The project has already moved beyond a single-stock toy strategy and now supports a simple portfolio selection workflow.
-
-### What exists now
-
-- Data pipeline
-  - [`src/data/universe.py`](/Users/y-yang/Developer/quant/src/data/universe.py) defines the stock universe helpers.
-  - [`src/data/bulk_loader.py`](/Users/y-yang/Developer/quant/src/data/bulk_loader.py) fetches historical data for multiple symbols.
-  - [`src/data/yfinance_loader.py`](/Users/y-yang/Developer/quant/src/data/yfinance_loader.py) provides Yahoo Finance loading support.
-
-- Strategies
-  - [`src/strategies/sma_crossover.py`](/Users/y-yang/Developer/quant/src/strategies/sma_crossover.py) is a simple single-name baseline.
-  - [`src/strategies/momentum_factor.py`](/Users/y-yang/Developer/quant/src/strategies/momentum_factor.py) ranks stocks by cross-sectional momentum and buys the top names monthly.
-  - [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py) is the current main stock-selection strategy. It combines:
-    - momentum
-    - low volatility
-    - mean reversion
-
-- Backtesting and execution modeling
-  - [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py) is the main CLI entry point for running backtests.
-  - [`src/engine/runner.py`](/Users/y-yang/Developer/quant/src/engine/runner.py) provides the engine runner.
-  - [`src/engine/commission.py`](/Users/y-yang/Developer/quant/src/engine/commission.py) models commissions and slippage assumptions.
-
-- Optimization
-  - [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) runs a rolling walk-forward search over factor weights and reports benchmark comparisons plus portfolio and universe-participation diagnostics.
-
-- Paper trading
-  - [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) generates live rebalance orders from the latest data using approved parameters by default.
-  - [`src/paper/db.py`](/Users/y-yang/Developer/quant/src/paper/db.py) stores cash, holdings, and order history in SQLite.
-  - [`src/paper/notifier.py`](/Users/y-yang/Developer/quant/src/paper/notifier.py) sends daily summaries.
-
-- Tests
-  - Tests now cover scoring, diagnostics, walk-forward artifacts, approval flow, and strategy parity, and the current offline suite passes on `main` without network access (`122 passed` at the time of this update).
-
-### What the current strategy does
-
-The main strategy in [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py):
-
-- computes factor values for each stock
-- converts each factor into a cross-sectional Z-score
-- combines those Z-scores using configurable weights
-- ranks the universe by total score
-- holds the top `N` stocks with equal weights
-- rebalances on month changes
-
-In short: the system already knows how to decide which stocks to buy from a small universe.
-
-### What is still missing
-
-The project is in a strong prototype stage, but it is not yet a robust production-grade decision engine.
-
-Main gaps:
-
-- Data validation now exists as a basic first layer, but it is still lightweight and does not yet cover richer cache-quality or coverage diagnostics.
-- Universe governance is now explicit and reproducible, but the configured universes are still small and static.
-- Portfolio diagnostics now include hit rate, contributor summaries, and universe-participation coverage in walk-forward output, but they still need to broaden for larger-universe analysis.
-- The project still lacks richer trust diagnostics such as rank-stability and factor-spread reporting, as well as explicit lifecycle states for moving research into paper trading.
-
-## Planned Milestones
-
-### Milestone 1: README and project framing
-
-Status: complete with this document.
-
-Goal:
-
-- Make the current architecture and direction easy to understand for future work.
-
-### Milestone 2: Walk-forward decision engine
-
-Status: complete.
-
-Goal:
-
-- Replace the current one-off optimization workflow with a rolling walk-forward process.
-
-Why this matters:
-
-- This is the most important next step for trustworthiness.
-- It moves the project from "we found weights that worked once" to "we are selecting stocks using parameters that were validated only on past data."
-
-Deliverables:
-
-- Rolling training and validation windows.
-- Per-period selection of factor weights.
-- A reusable artifact containing chosen weights by rebalance date.
-- Clear comparison between fixed weights and walk-forward weights.
-
-Acceptance criteria:
-
-- A command can run walk-forward optimization across multiple rebalance periods.
-- For each rebalance date, the system selects weights using only prior data.
-- The output is saved in a machine-readable format such as CSV or JSON.
-- Backtest results can compare:
-  - static default weights
-  - one-shot optimized weights
-  - walk-forward weights
-- The workflow can be rerun deterministically on the same cached data.
-
-Completed so far:
-
-- [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) now runs a rolling walk-forward workflow instead of only a one-shot IS/OOS script.
-- Rolling train and validation window construction lives in [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py).
-- Walk-forward runs persist per-rebalance weights and summary artifacts under `.research_artifacts/`.
-- The walk-forward workflow now reports static default, one-shot optimized, and walk-forward return comparisons, plus average hit rate and top/bottom contributor summaries, in the same run summary.
-- Regression coverage for walk-forward windowing, weight selection, artifact writing, summary diagnostics, and runner output lives in [`tests/research/test_walk_forward.py`](/Users/y-yang/Developer/quant/tests/research/test_walk_forward.py) and [`tests/research/test_diagnostics.py`](/Users/y-yang/Developer/quant/tests/research/test_diagnostics.py).
-- Determinism-oriented regression coverage and artifact-loading ergonomics for downstream consumers are now covered by the research test suite.
-
-### Milestone 3: Explainable stock selection
-
-Status: complete.
-
-Goal:
-
-- Make each buy decision understandable.
-
-Deliverables:
-
-- Save factor-level scores for each stock on each rebalance date.
-- Show why a stock was selected, for example:
-  - momentum contribution
-  - volatility contribution
-  - mean reversion contribution
-  - final composite score
-- Add reporting for the top winners and near-misses.
-
-Why this matters:
-
-- It makes debugging easier.
-- It helps confirm whether the strategy is behaving as intended.
-- It makes paper-trading decisions easier to trust.
-
-Acceptance criteria:
-
-- Each rebalance produces a record of per-stock factor values and final scores.
-- The system can show the selected stocks and at least the next few near-miss candidates.
-- A user can inspect why one stock ranked above another on a given rebalance date.
-- The explainability output is generated from the same scoring logic as the strategy itself.
-
-Completed so far:
-
-- The shared scorer in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py) now emits factor contribution columns alongside raw factors, Z-scores, total score, rank, and top-`N` flags.
-- Paper-signal artifacts written through [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) and [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py) now persist winners, near-misses, and the full scored universe.
-- Lightweight explainability helpers for winner/near-miss inspection and symbol-vs-symbol comparison now live in [`src/research/explain.py`](/Users/y-yang/Developer/quant/src/research/explain.py).
-- The Backtrader multi-factor strategy in [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py) can now persist a scored-universe artifact for each rebalance, including factor contributions, winners, near-misses, and rebalance-date metadata.
-- Regression coverage for scorer-native explainability, artifact persistence, and reporting helpers lives in [`tests/scoring/test_multi_factor.py`](/Users/y-yang/Developer/quant/tests/scoring/test_multi_factor.py), [`tests/research/test_artifacts.py`](/Users/y-yang/Developer/quant/tests/research/test_artifacts.py), and [`tests/research/test_explain.py`](/Users/y-yang/Developer/quant/tests/research/test_explain.py).
-- Strategy-level rebalance artifact coverage now lives in [`tests/strategies/test_multi_factor_parity.py`](/Users/y-yang/Developer/quant/tests/strategies/test_multi_factor_parity.py).
-
-### Milestone 4: Paper trader alignment with research pipeline
-
-Status: complete.
-
-Goal:
-
-- Ensure live signals are generated from the same validated decision logic used in research.
-
-Deliverables:
-
-- Paper-trading signal generation reads the latest approved walk-forward parameters.
-- Shared scoring logic between backtest and live signal generation.
-- Reduced drift between research code and live decision code.
-
-Why this matters:
-
-- The current project already has a paper-trading loop, so connecting it tightly to validated research is the highest-leverage operational improvement.
-
-Acceptance criteria:
-
-- Paper-trading signal generation does not duplicate factor math in a separate incompatible path.
-- The paper trader can load the latest validated parameter set automatically.
-- Given the same date and market data, research mode and paper-trading mode produce the same ranked winners.
-- The project documents where validated parameters live and how they are refreshed.
-
-Completed so far:
-
-- Shared scoring logic now lives in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py).
-- [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) uses the shared scorer instead of maintaining a separate factor-math path.
-- [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py) now routes ranking through the shared scorer via a Backtrader adapter instead of maintaining its own factor-math path.
-- Tests cover ranking parity between the shared scorer and paper-signal generation.
-- Tests now cover ranking parity across the shared scorer, the Backtrader strategy adapter, and the paper-trading path under the same weights.
-- Walk-forward parameter artifacts can now be produced by [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py).
-- Approved paper-trading params can now be selected from qualified walk-forward runs and loaded by the paper trader by default.
-- An operator-facing approval CLI now lives in [`src/research/approve.py`](/Users/y-yang/Developer/quant/src/research/approve.py), including candidate listing and default approval of the latest rebalance date for a chosen run.
-- The multi-factor backtest path in [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py) now uses the same approved params source by default unless explicit CLI weights are supplied.
-- The walk-forward optimizer now supports explicit CLI time-window control in [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py), so research runs can be reproduced and approved against stable date ranges instead of hand-edited script values.
-
-### Milestone 5: Turnover and risk controls
-
-Status: complete.
-
-Goal:
-
-- Reduce fragile portfolio churn and make rebalancing more realistic.
-
-Deliverables:
-
-- Rank buffer or buy/sell threshold rules.
-- Optional minimum holding period.
-- Optional volatility or concentration caps.
-- Better transaction-awareness around rebalance decisions.
-
-Why this matters:
-
-- A strategy can look good on ranking quality but still lose edge through overtrading.
-
-Acceptance criteria:
-
-- The strategy can optionally keep a current holding unless it falls below a configurable sell threshold.
-- Backtest output includes at least one turnover-related metric.
-- We can compare portfolio behavior before and after turnover controls.
-- Risk-control settings are configurable and do not break the base strategy path.
-
-Completed so far:
-
-- [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py) now supports configurable `buy_rank_threshold` and `sell_rank_threshold` controls while preserving the original top-`N` behavior by default.
-- The multi-factor rebalance path now keeps existing holdings inside the sell buffer, only admits new names inside the buy threshold, and still caps final target holdings by `top_n`.
-- Simple turnover metrics now flow through the strategy and reusable backtest runner, including rebalance count, position change count, and turnover ratio.
-- [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py) now accepts turnover-control CLI settings and reports turnover metrics in multi-factor backtest output.
-- Focused turnover-control regression coverage now lives in [`tests/strategies/test_multi_factor_turnover.py`](/Users/y-yang/Developer/quant/tests/strategies/test_multi_factor_turnover.py).
-- Existing parity and backtest-default coverage now also validates that buffered turnover controls do not break the base shared-scoring path or approved-weight resolution workflow.
-
-### Milestone 6: Stronger test coverage
-
-Status: complete.
-
-Goal:
-
-- Build confidence that ranking, rebalancing, and paper trading remain correct as the system evolves.
-
-Deliverables:
-
-- Strategy tests for factor scoring and top-`N` selection.
-- Rebalance tests for entering, exiting, and resizing positions.
-- Tests that verify live signal generation matches the research scoring logic.
-- Regression tests for optimizer and walk-forward output.
-
-Acceptance criteria:
-
-- Tests cover both ranking correctness and rebalance behavior.
-- At least one test ensures paper-trading signals match shared research scoring.
-- At least one regression-style test protects walk-forward output shape and saved artifacts.
-- The core milestone workflows can run in CI without requiring live network access.
-
-Completed so far:
-
-- Shared scoring behavior is covered in [`tests/scoring/test_multi_factor.py`](/Users/y-yang/Developer/quant/tests/scoring/test_multi_factor.py).
-- Artifact writing and registry behavior are covered in [`tests/research/test_artifacts.py`](/Users/y-yang/Developer/quant/tests/research/test_artifacts.py).
-- Portfolio diagnostics, including hit rate and contributor summaries, are covered in [`tests/research/test_diagnostics.py`](/Users/y-yang/Developer/quant/tests/research/test_diagnostics.py).
-- Paper-signal parity with the shared scorer is covered at the unit-test level.
-- Walk-forward runner behavior and artifact shape are covered in [`tests/research/test_walk_forward.py`](/Users/y-yang/Developer/quant/tests/research/test_walk_forward.py).
-- Rebalance behavior now has a no-op regression for non-rankable universes in [`tests/strategies/test_multi_factor_parity.py`](/Users/y-yang/Developer/quant/tests/strategies/test_multi_factor_parity.py).
-- The main backtest CLI has a CI-oriented offline smoke test that verifies approved-parameter resolution and plotting suppression in [`tests/research/test_backtest_defaults.py`](/Users/y-yang/Developer/quant/tests/research/test_backtest_defaults.py).
-- The offline approval flow is covered end to end in [`tests/research/test_approved_params.py`](/Users/y-yang/Developer/quant/tests/research/test_approved_params.py) and [`tests/research/test_approve_cli.py`](/Users/y-yang/Developer/quant/tests/research/test_approve_cli.py).
-- The milestone is closed out by a small CI-friendly regression pack that runs without network access and exercises research artifacts, approval selection, strategy parity, and the backtest entrypoint together.
-
-Milestone 6 closeout:
-
-- Added deeper rebalance-behavior coverage without changing strategy logic.
-- Added regression coverage for walk-forward outputs, parameter artifacts, and approval round-tripping.
-- Added offline workflow checks for the main backtest entrypoint so core research and paper-trading paths stay CI-safe.
-
-### Milestone 7: Better universe and portfolio research
-
-Status: in progress.
-
-Goal:
-
-- Improve the quality of research inputs and portfolio construction.
-
-Deliverables:
-
-- Larger universe support.
-- More realistic universe definitions.
-- Better baselines and benchmark comparisons.
-- Portfolio analytics such as turnover, hit rate, and contribution analysis.
-
-Acceptance criteria:
-
-- The system can evaluate a larger configured universe without changing core strategy code.
-- At least one benchmark comparison is available in reports.
-- Research output includes portfolio-level diagnostics beyond return alone.
-- Universe definition is explicit and reproducible for a given experiment.
-
-Completed so far:
-
-- Benchmark comparison is already available in walk-forward reporting through [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) and [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py).
-- Portfolio-level turnover diagnostics already flow through the strategy and backtest output via [`src/engine/runner.py`](/Users/y-yang/Developer/quant/src/engine/runner.py) and [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py).
-- Walk-forward research output now includes portfolio-level hit-rate summaries and top/bottom contributor summaries alongside return comparisons.
-- Universe selection is now explicit and reproducible through the named registry in [`src/data/universe.py`](/Users/y-yang/Developer/quant/src/data/universe.py), the backtest CLI in [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py), and the optimizer CLI in [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py).
-- The named registry now includes two larger curated Japanese equity universes for Milestone 7 research.
-- Research artifacts can now persist `universe_name` and `universe_symbols` metadata via [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py).
-
-Still missing for milestone closeout:
-
-- stronger research outputs around larger-universe behavior
-- richer trust diagnostics such as rank stability and factor spread
-- explicit lifecycle states between research approval and paper trading
-
-### Milestone X: Research Platform Foundation
-
-Status: in progress.
-
-Goal:
-
-- Add the missing platform layer that makes research outputs traceable, comparable, reusable, and safer to connect to paper trading.
-
-Why this matters:
-
-- The project already has strategies, optimization, and paper trading.
-- The current weak point is not "lack of features" but "lack of confidence infrastructure."
-- In practice, this solves the trust problem of research/live drift: the same score is computed once, saved once, and can be audited or replayed later.
-- Without this layer, the system can produce recommendations before it can clearly prove:
-  - why the recommendation exists
-  - whether the result is reproducible
-  - whether research and paper trading are using the same decision logic
-  - whether the system is becoming more trustworthy over time
-
-Core components:
-
-- Unified Scoring Core
-  - Shared scoring logic in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py) used by research, backtesting, optimization, and paper trading.
-- Experiment Registry
-  - A structured record of each experiment, including universe, date range, parameters, benchmark, metrics, and artifact paths.
-- Research Artifact Store
-  - Persistent outputs written under `.research_artifacts/` via [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py) and tracked in [`src/research/registry.py`](/Users/y-yang/Developer/quant/src/research/registry.py).
-- Benchmark and Attribution Layer
-  - Explicit baseline comparison so we can measure active value, not only absolute returns.
-- Data Validation Layer
-  - Checks for missing data, duplicate rows, date coverage, cache quality, and other silent data issues.
-- Diagnostics Layer
-  - Metrics such as turnover, hit rate summaries, contributor summaries, rank stability, holding period, and factor spread behavior.
-- Portfolio Construction Layer
-  - A clear portfolio-building step that can evolve beyond equal weight top-`N`.
-- Calendar and Rebalance Policy
-  - Explicit rules for signal timing, trading days, and rebalance scheduling.
-- Strategy Lifecycle States
-  - States such as draft, research-approved, and paper-active to prevent mixing experimental ideas with paper-traded decisions.
-- Universe Governance
-  - Reproducible universe definitions for research and future point-in-time improvements.
-
-Recommended priority:
-
-1. Unified Scoring Core
-2. Experiment Registry
-3. Research Artifact Store
-4. Benchmark and Attribution Layer
-5. Data Validation Layer
-6. Diagnostics Layer
-7. Portfolio Construction Layer
-8. Calendar and Rebalance Policy
-9. Strategy Lifecycle States
-10. Universe Governance
-
-Completed so far:
-
-- Unified Scoring Core in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py)
-- Experiment Registry in [`src/research/registry.py`](/Users/y-yang/Developer/quant/src/research/registry.py)
-- Research Artifact Store in [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py)
-- Paper-signal integration through [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py)
-- Walk-forward orchestration and weight artifacts through [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py) and [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py)
-- Approved-parameter loading and operator approval flow through [`src/research/approved_params.py`](/Users/y-yang/Developer/quant/src/research/approved_params.py) and [`src/research/approve.py`](/Users/y-yang/Developer/quant/src/research/approve.py)
-- Explicit benchmark comparison output in walk-forward summaries through [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py)
-- Basic data validation for cached historical slices through [`src/research/data_validation.py`](/Users/y-yang/Developer/quant/src/research/data_validation.py) and [`src/data/bulk_loader.py`](/Users/y-yang/Developer/quant/src/data/bulk_loader.py)
-- Universe-governance foundations through named universe selection in [`src/data/universe.py`](/Users/y-yang/Developer/quant/src/data/universe.py) plus CLI and artifact wiring in [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py), [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py), and [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py)
-
-Next foundation slice:
-
-- richer diagnostics beyond the current hit-rate, contributor, and universe-participation summaries, such as rank stability and factor spread analysis
-- explicit strategy lifecycle states on top of approved-parameter loading
-- broader universe governance beyond the initial named static registry
-
-Acceptance criteria:
-
-- Research, backtest, optimization, and paper trading can point to the same scoring logic.
-- Every meaningful experiment produces a recorded configuration and saved artifacts.
-- Results can be compared against at least one explicit benchmark.
-- Data quality failures are detected before they silently affect conclusions.
-- The system can explain not only what it recommends, but also how trustworthy that recommendation is.
+The main strategy in [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py) uses the shared scorer in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py).
+
+| Factor | Current definition | Direction | Current lookback |
+| --- | --- | --- | --- |
+| Momentum | Price return from the current close to the close `90` trading days earlier | Higher is better | `90` days |
+| Low volatility | Standard deviation of daily returns over the last `20` trading days | Lower is better | `20` days |
+| Mean reversion | Distance between the current close and the `20`-day simple moving average | Lower is better | `20` days |
+
+These raw factor values are converted into cross-sectional Z-scores on each rebalance date and combined with configurable weights. The portfolio then holds the top `N` names with equal target weights, with optional buy/sell rank buffers to reduce churn.
+
+## Architecture Flow
+
+The high-level research and execution path is:
+
+`Yahoo Finance / cache -> universe definition -> shared scorer -> backtest or walk-forward research -> artifact store and registry -> approved params -> paper-trading bot`
+
+The main modules are:
+
+- Data and universe loading:
+  [`src/data/universe.py`](/Users/y-yang/Developer/quant/src/data/universe.py),
+  [`src/data/bulk_loader.py`](/Users/y-yang/Developer/quant/src/data/bulk_loader.py),
+  [`src/data/yfinance_loader.py`](/Users/y-yang/Developer/quant/src/data/yfinance_loader.py)
+- Shared scoring and strategy logic:
+  [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py),
+  [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py)
+- Backtesting and execution modeling:
+  [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py),
+  [`src/engine/runner.py`](/Users/y-yang/Developer/quant/src/engine/runner.py),
+  [`src/engine/commission.py`](/Users/y-yang/Developer/quant/src/engine/commission.py)
+- Walk-forward research, artifacts, and approvals:
+  [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py),
+  [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py),
+  [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py),
+  [`src/research/registry.py`](/Users/y-yang/Developer/quant/src/research/registry.py),
+  [`src/research/approve.py`](/Users/y-yang/Developer/quant/src/research/approve.py)
+- Paper trading:
+  [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py),
+  [`src/paper/db.py`](/Users/y-yang/Developer/quant/src/paper/db.py),
+  [`src/paper/notifier.py`](/Users/y-yang/Developer/quant/src/paper/notifier.py)
+
+## Current State
+
+What exists now:
+
+- A shared multi-factor scorer is already used across research, backtesting, and paper-trading paths.
+- Walk-forward optimization can save per-rebalance parameter choices and benchmark comparisons under `.research_artifacts/`.
+- Paper trading can load approved parameters instead of maintaining a separate factor-math path.
+- Explainability artifacts can persist winners, near-misses, and full scored universes.
+- The offline test suite covers scoring, diagnostics, artifact persistence, approval flow, and ranking parity.
+
+What is still missing:
+
+- Data validation is still lightweight and does not yet cover richer cache-quality, coverage, or corporate-action diagnostics.
+- Configured universes are explicit and reproducible, but they are still static lists rather than point-in-time membership sets.
+- Trust diagnostics still need to grow beyond turnover, hit rate, contributors, and participation coverage.
+- Strategy lifecycle controls between research, approval, and paper activation are still thinner than they should be.
+
+Detailed milestone history and completion notes live in [`docs/progress.md`](/Users/y-yang/Developer/quant/docs/progress.md).
+
+## Quant Guardrails and Current Limits
+
+This README should make the current research limits explicit:
+
+- Look-ahead bias:
+  the walk-forward workflow is designed to choose weights using prior data only, but the current strategy still works from end-of-day bars and monthly rebalance logic. It should be treated as a research approximation until signal timing and trading-calendar policy become more explicit.
+- Yahoo Finance data quality:
+  [`src/data/yfinance_loader.py`](/Users/y-yang/Developer/quant/src/data/yfinance_loader.py) currently wraps `yf.download(...)` with minimal post-processing. Adjusted-price conventions, suspensions, delistings, and other corporate-action edge cases are not yet independently normalized or audited in this project.
+- Survivorship bias:
+  the named universes in [`src/data/universe.py`](/Users/y-yang/Developer/quant/src/data/universe.py) are curated static lists, not historical point-in-time constituents. Backtest results may therefore overstate robustness.
+- Transaction-cost sensitivity:
+  commission and slippage are modeled in [`src/engine/commission.py`](/Users/y-yang/Developer/quant/src/engine/commission.py), but the project still needs more explicit sensitivity analysis under higher-friction assumptions.
+
+Those constraints mean the current output is best used as research evidence, not as proof that the strategy is ready for real capital.
 
 ## Trust Model
 
@@ -403,202 +102,55 @@ The project should not treat profitability alone as proof of quality.
 
 Instead, system trustworthiness should be evaluated across four dimensions:
 
-### 1. Consistency
-
-The same data, date, and parameters should produce the same ranking and decision output across research and paper-trading paths.
-
-Signals of improvement:
-
-- research and paper-trading ranking parity
-- reduced drift across execution paths
-- parameter usage that matches approved recorded artifacts
-
-### 2. Reproducibility
-
-Any important result should be rerunnable from stored inputs and artifacts.
-
-Signals of improvement:
-
-- each experiment has a traceable record
-- artifacts are saved and reloadable
-- repeated runs on the same cached data produce the same outputs
-
-### 3. Relative Edge
-
-The strategy should be evaluated against explicit baselines, not just on absolute returns.
-
-Signals of improvement:
-
-- outperformance versus equal-weight or other benchmark baselines
-- better drawdown behavior relative to benchmark
-- walk-forward results that hold up against static defaults
-
-### 4. Stability
-
-A useful strategy should remain credible across time windows and reasonable parameter changes.
-
-Signals of improvement:
-
-- walk-forward robustness
-- lower unnecessary turnover
-- stable rank behavior
-- lower sensitivity to small changes in configuration
+1. Consistency
+   The same data, date, and parameters should produce the same ranking and decision output across research and paper-trading paths.
+2. Reproducibility
+   Important results should be rerunnable from stored inputs and artifacts.
+3. Relative edge
+   Strategy performance should be compared against explicit baselines, not only absolute returns.
+4. Stability
+   A useful strategy should remain credible across time windows and reasonable parameter changes.
 
 ## Confidence Levels
 
-To keep the roadmap practical, we can think about the system in three confidence stages.
+- Low confidence:
+  the system can generate recommendations, but research and execution trust is still limited.
+- Medium confidence:
+  shared scoring, artifacts, benchmark comparisons, and reproducible universes make conclusions inspectable.
+- High confidence:
+  stronger data validation, long-running out-of-sample evidence, lifecycle controls, and trust diagnostics create a durable feedback loop.
 
-### Low Confidence
+## Milestone Status
 
-The system can generate recommendations, but trust is limited.
+The roadmap is now organized as numbered milestones only:
 
-Typical traits:
+| Milestone | Status | Focus |
+| --- | --- | --- |
+| 1 | Complete | README and project framing |
+| 2 | Complete | Walk-forward decision engine |
+| 3 | Complete | Explainable stock selection |
+| 4 | Complete | Paper trader alignment with research pipeline |
+| 5 | Complete | Turnover and risk controls |
+| 6 | Complete | Stronger test coverage |
+| 7 | In progress | Better universe and portfolio research |
+| 8 | In progress | Confidence infrastructure and lifecycle controls |
 
-- research and paper-trading logic may drift
-- result tracking is incomplete
-- benchmark comparison is weak
-- recommendations are difficult to audit after the fact
+Milestone 8 replaces the old "Milestone X" label. It is a follow-on platform milestone, not a parallel track to Milestone 7.
 
-### Medium Confidence
+The intended boundary is:
 
-The system has enough structure to make research conclusions meaningfully inspectable.
+- Milestone 7 focuses on larger universes, benchmark coverage, and richer portfolio diagnostics.
+- Milestone 8 focuses on confidence infrastructure such as data validation, traceability, lifecycle states, and trust reporting.
 
-Typical traits:
+## Near-Term Priorities
 
-- shared scoring logic
-- experiment registry and saved artifacts
-- walk-forward outputs recorded
-- explicit benchmark comparisons
-- basic diagnostics and data validation
-- explicit, reproducible universe selection
+If work continues now, the recommended order is:
 
-### High Confidence
+1. Add richer diagnostics such as rank-stability and factor-spread reporting.
+2. Expand universe governance beyond the initial static named registries.
+3. Strengthen lifecycle-state and trust-reporting infrastructure on top of saved artifacts.
 
-The system has a strong feedback loop for both decision quality and operational discipline.
-
-Typical traits:
-
-- robust data validation
-- long-running out-of-sample evidence
-- strong research and paper-trading parity
-- portfolio construction and lifecycle controls
-- clear evidence that trustworthiness is improving over time
-
-## Execution Plan
-
-This section turns the roadmap into a practical build order with a clear definition of done.
-
-### Phase 1: Make decisions trustworthy
-
-Scope:
-
-- Build Milestone 2 first.
-
-Status: complete.
-
-Definition of done:
-
-- We can run a walk-forward experiment end to end.
-- The chosen weights are saved by rebalance date.
-- The results are comparable against the current static-weight approach.
-
-Suggested implementation tasks:
-
-1. Refactor optimization code so parameter search can run for an arbitrary date window.
-2. Add rolling window orchestration on top of that reusable optimizer.
-3. Save validated weights to an artifact file.
-4. Add summary output comparing walk-forward and baseline performance.
-5. Extend the same summary so static default, one-shot optimized, and walk-forward results can be compared side by side.
-
-### Phase 2: Remove research/live drift
-
-Scope:
-
-- Build Milestone 4 immediately after Milestone 2.
-
-Status: complete.
-
-Definition of done:
-
-- Live paper-trading signals and research backtests share the same scoring logic and parameter source.
-
-Suggested implementation tasks:
-
-1. Backtest/research path should consume the same shared scorer where practical.
-2. Update the paper trader to read validated parameters from the walk-forward artifact.
-3. Add a parity test between research ranking and paper-trading ranking under the validated parameter source.
-
-### Phase 3: Make stock picks explainable
-
-Scope:
-
-- Build Milestone 3 once the live and research paths are aligned.
-
-Status: complete.
-
-Definition of done:
-
-- For any rebalance date, we can explain why a stock was selected.
-
-Suggested implementation tasks:
-
-1. Persist factor inputs and weighted contributions from the shared scorer.
-2. Save winner and near-miss evidence in durable artifacts.
-3. Make rebalance decisions inspectable from saved evidence without recomputing factor math.
-
-### Phase 4: Reduce unnecessary trading
-
-Scope:
-
-- Build Milestone 5 after explainability makes the strategy easier to inspect.
-
-Definition of done:
-
-- We can measure and reduce avoidable portfolio churn.
-
-Suggested implementation tasks:
-
-1. Add sell-buffer and buy-buffer rules.
-2. Add turnover metrics to backtest output.
-3. Compare performance and trading activity with and without the new controls.
-
-### Phase 5: Harden the system
-
-Scope:
-
-- Build Milestones 6 and 7 as the stabilization and scaling phase.
-
-Definition of done:
-
-- The project is easier to extend, test, and trust with larger universes and richer reporting.
-
-Suggested implementation tasks:
-
-1. Expand unit and regression tests around ranking and rebalance behavior.
-2. Remove avoidable duplication in research and execution code paths.
-3. Add broader benchmark and portfolio analytics support.
-4. Expand universe definitions in a controlled, reproducible way.
-5. Deepen the data-validation layer beyond the current lightweight first pass.
-
-## Recommended Immediate Next Task
-
-If we are continuing implementation now, the best next task is to build on the current walk-forward and explainability layers with richer diagnostics and broader research governance:
-
-1. Add portfolio diagnostics such as rank stability and factor-spread analysis on top of the existing hit-rate, contribution, and coverage summaries.
-2. Expand named universes in a controlled, reproducible way.
-3. Strengthen lifecycle-state and trust-reporting infrastructure on top of the saved artifacts.
-
-That would turn the current explainable decision engine into one that is easier to compare, audit, and scale.
-
-## Suggested Near-Term Order
-
-If we want the best sequence from here, the recommended order is:
-
-1. Add richer diagnostics on top of the new data-validation and explainability foundations.
-2. Expand named universes in a controlled, reproducible way.
-3. Strengthen lifecycle and trust-reporting infrastructure.
-
-That order improves decision quality first, then operational consistency, then safety and maintainability.
+That sequence improves decision quality first, then research breadth, then operational discipline.
 
 ## How to Run the Current Project
 
@@ -628,7 +180,7 @@ uv run python -m src.optimize --start 2024-01-04 --end 2025-12-30 --train-months
 uv run python -m src.optimize --universe-name topix_top_10 --start 2024-01-04 --end 2025-12-30 --train-months 12 --validation-months 6 --step-months 6
 ```
 
-`src.optimize` now supports explicit CLI control over the research window, named universe selection, and walk-forward settings. Its default research period is `2021-01-01` through `2024-01-01`, with a 12-month training window, 6-month validation window, and 6-month step size. It prints a summary that compares static default weights, one-shot optimized weights, and walk-forward weights, along with average hit rate and contributor summaries when available. Walk-forward artifacts are written under `.research_artifacts/` and can now persist `universe_name` and `universe_symbols` metadata. The newest run is not automatically treated as approved for paper trading. Instead, paper trading should use the approved params file at `.research_artifacts/paper_trade_params.json`, which points to a chosen validated parameter set.
+`src.optimize` supports explicit CLI control over the research window, named universe selection, and walk-forward settings. Its default research period is `2021-01-01` through `2024-01-01`, with a `12`-month training window, `6`-month validation window, and `6`-month step size. Walk-forward artifacts are written under `.research_artifacts/`, and paper trading should use the approved params file at `.research_artifacts/paper_trade_params.json` rather than assuming the newest run is automatically approved.
 
 Operator approval flow:
 
@@ -644,21 +196,15 @@ uv run python -m src.research.approve approve --run-id <id>
 uv run python -m src.research.approve approve --run-id <id> --rebalance-date YYYY-MM-DD
 ```
 
-The strict offline verification path for Milestone 2 lives in the research tests, including walk-forward summary regression coverage, deterministic artifact checks, approved-parameter validation, and an offline optimizer smoke test.
+Paper trading:
 
 ```bash
 uv run python -m src.paper.bot status
 uv run python -m src.paper.bot generate
 ```
 
+Tests:
+
 ```bash
 uv run pytest -q
 ```
-
-## Notes
-
-- The current system is best understood as a research prototype with real momentum toward a more disciplined portfolio engine.
-- The strongest completed capability today is cross-sectional stock ranking and top-`N` portfolio selection.
-- The shared scoring core and experiment artifact foundation are now in place, and the next platform slice has started to add explicit universe selection and basic data validation.
-- Milestone 3 explainability is now closed across paper-signal artifacts, saved scoring runs, and strategy-level rebalance artifacts.
-- Python dependencies are now managed through `uv` using [`pyproject.toml`](/Users/y-yang/Developer/quant/pyproject.toml) and `uv.lock`.
