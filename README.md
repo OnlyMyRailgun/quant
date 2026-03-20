@@ -496,16 +496,24 @@ That order improves decision quality first, then operational consistency, then s
 Examples:
 
 ```bash
-python3 src/main.py --strategy multi --universe --no-plot
+uv sync --dev
 ```
 
 ```bash
-python3 src/optimize.py
+uv run python -m src.main --strategy multi --universe --no-plot
 ```
 
 ```bash
-python3 src/paper/bot.py status
-python3 src/paper/bot.py generate
+uv run python -m src.optimize
+```
+
+```bash
+uv run python -m src.paper.bot status
+uv run python -m src.paper.bot generate
+```
+
+```bash
+uv run pytest -q
 ```
 
 ## Notes
@@ -513,3 +521,4 @@ python3 src/paper/bot.py generate
 - The current system is best understood as a research prototype with real momentum toward a more disciplined portfolio engine.
 - The strongest completed capability today is cross-sectional stock ranking and top-`N` portfolio selection.
 - The highest-value next milestone is making those buy decisions walk-forward validated and consistent between backtest and paper trading.
+- Python dependencies are now managed through `uv` using [`pyproject.toml`](/Users/y-yang/Developer/quant/pyproject.toml) and `uv.lock`.

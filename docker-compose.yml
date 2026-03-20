@@ -21,7 +21,7 @@ services:
     # The container runs the daily signal generator at 18:00 JST (9:00 UTC).
     # Uses supercronic (below) for reliable cron inside Docker.
     command: >
-      sh -c "echo '0 9 * * 1-5 PYTHONPATH=/app python3 /app/src/paper/bot.py generate >> /app/logs/daily.log 2>&1' | supercronic -"
+      sh -c "echo '0 9 * * 1-5 python3 -m src.paper.bot generate >> /app/logs/daily.log 2>&1' | supercronic -"
 
     restart: unless-stopped
     

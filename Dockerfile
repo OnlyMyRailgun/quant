@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────
 # Stage 1: Builder — install all dependencies
 # ─────────────────────────────────────────────────────────────
-FROM python:3.11-slim AS builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
@@ -11,14 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# Install uv and resolve dependencies from the project lockfile
+RUN pip install --no-cache-dir uv
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-dev --format requirements-txt -o requirements.lock \
+    && pip install --no-cache-dir --prefix=/install -r requirements.lock
 
 # ─────────────────────────────────────────────────────────────
 # Stage 2: Runtime — lean production image
 # ─────────────────────────────────────────────────────────────
-FROM python:3.11-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
@@ -45,4 +47,4 @@ ENV PYTHONUNBUFFERED=1 \
     TZ="Asia/Tokyo"
 
 # Default command: show help
-CMD ["python3", "src/paper/bot.py", "--help"]
+CMD ["python3", "-m", "src.paper.bot", "--help"]
