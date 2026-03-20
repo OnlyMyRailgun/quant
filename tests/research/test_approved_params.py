@@ -232,6 +232,129 @@ def test_resolve_approved_weight_values_merges_explicit_overrides_with_approved_
     assert resolved == {"mom": 1.0, "vol": 1.0, "rev": 0.5}
 
 
+def test_offline_walk_forward_approval_workflow_round_trips_artifacts(tmp_path: Path):
+    run_dir_a = tmp_path / "walk_forward" / "run-a"
+    run_dir_b = tmp_path / "walk_forward" / "run-b"
+    run_dir_a.mkdir(parents=True)
+    run_dir_b.mkdir(parents=True)
+
+    weights_a = run_dir_a / "weights.csv"
+    weights_b = run_dir_b / "weights.csv"
+    summary_a = run_dir_a / "summary.json"
+    summary_b = run_dir_b / "summary.json"
+    metadata_a = run_dir_a / "metadata.json"
+    metadata_b = run_dir_b / "metadata.json"
+
+    pd.DataFrame(
+        [
+            {
+                "rebalance_date": "2022-01-01",
+                "weight_mom": 1.0,
+                "weight_vol": 0.0,
+                "weight_rev": 0.0,
+            },
+            {
+                "rebalance_date": "2022-07-01",
+                "weight_mom": 0.0,
+                "weight_vol": 1.0,
+                "weight_rev": 0.5,
+            },
+        ]
+    ).to_csv(weights_a, index=False)
+    pd.DataFrame(
+        [
+            {
+                "rebalance_date": "2022-01-01",
+                "weight_mom": 0.5,
+                "weight_vol": 1.0,
+                "weight_rev": 0.5,
+            },
+            {
+                "rebalance_date": "2022-07-01",
+                "weight_mom": 0.0,
+                "weight_vol": 1.0,
+                "weight_rev": 0.5,
+            },
+        ]
+    ).to_csv(weights_b, index=False)
+
+    summary_a.write_text(
+        json.dumps(
+            {
+                "window_count": 4,
+                "baseline_return_pct": 1.0,
+                "walk_forward_return_pct": 2.0,
+                "active_return_pct": 1.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary_b.write_text(
+        json.dumps(
+            {
+                "window_count": 4,
+                "baseline_return_pct": 1.5,
+                "walk_forward_return_pct": 4.0,
+                "active_return_pct": 2.5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    metadata_a.write_text(json.dumps({"run_id": "wf-a"}), encoding="utf-8")
+    metadata_b.write_text(json.dumps({"run_id": "wf-b"}), encoding="utf-8")
+
+    (tmp_path / "registry.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "run_id": "wf-a",
+                        "run_name": "walk_forward",
+                        "run_dir": str(run_dir_a),
+                        "metadata": str(metadata_a),
+                        "weights": str(weights_a),
+                        "summary": str(summary_a),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "run_id": "wf-b",
+                        "run_name": "walk_forward",
+                        "run_dir": str(run_dir_b),
+                        "metadata": str(metadata_b),
+                        "weights": str(weights_b),
+                        "summary": str(summary_b),
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    candidates = load_walk_forward_run_candidates(tmp_path)
+    assert [candidate["run_id"] for candidate in candidates] == ["wf-a", "wf-b"]
+    assert [candidate["latest_rebalance_date"] for candidate in candidates] == ["2022-07-01", "2022-07-01"]
+
+    approved = approve_best_walk_forward_run(tmp_path, min_window_count=3)
+    assert approved["source_run_id"] == "wf-b"
+    assert approved["rebalance_date"] == "2022-07-01"
+    assert (tmp_path / "paper_trade_params.json").exists()
+
+    loaded = load_approved_paper_trading_params(tmp_path)
+    assert loaded["source_run_id"] == "wf-b"
+    assert loaded["rebalance_date"] == "2022-07-01"
+
+    resolved = resolve_approved_weight_values(
+        artifact_dir=tmp_path,
+        weight_mom=None,
+        weight_vol=None,
+        weight_rev=None,
+        fallback=(1.0, 1.0, 1.0),
+    )
+    assert resolved == {"mom": 0.0, "vol": 1.0, "rev": 0.5}
+
+
 def test_load_approved_paper_trading_params_raises_clear_error_for_invalid_json(tmp_path: Path):
     approved_path = tmp_path / "paper_trade_params.json"
     approved_path.write_text("{bad json", encoding="utf-8")

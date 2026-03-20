@@ -199,7 +199,7 @@ Completed so far:
 
 ### Milestone 5: Turnover and risk controls
 
-Status: not started.
+Status: complete.
 
 Goal:
 
@@ -223,9 +223,18 @@ Acceptance criteria:
 - We can compare portfolio behavior before and after turnover controls.
 - Risk-control settings are configurable and do not break the base strategy path.
 
+Completed so far:
+
+- [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py) now supports configurable `buy_rank_threshold` and `sell_rank_threshold` controls while preserving the original top-`N` behavior by default.
+- The multi-factor rebalance path now keeps existing holdings inside the sell buffer, only admits new names inside the buy threshold, and still caps final target holdings by `top_n`.
+- Simple turnover metrics now flow through the strategy and reusable backtest runner, including rebalance count, position change count, and turnover ratio.
+- [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py) now accepts turnover-control CLI settings and reports turnover metrics in multi-factor backtest output.
+- Focused turnover-control regression coverage now lives in [`tests/strategies/test_multi_factor_turnover.py`](/Users/y-yang/Developer/quant/tests/strategies/test_multi_factor_turnover.py).
+- Existing parity and backtest-default coverage now also validates that buffered turnover controls do not break the base shared-scoring path or approved-weight resolution workflow.
+
 ### Milestone 6: Stronger test coverage
 
-Status: in progress.
+Status: complete.
 
 Goal:
 
@@ -251,12 +260,16 @@ Completed so far:
 - Artifact writing and registry behavior are covered in [`tests/research/test_artifacts.py`](/Users/y-yang/Developer/quant/tests/research/test_artifacts.py).
 - Paper-signal parity with the shared scorer is covered at the unit-test level.
 - Walk-forward runner behavior and artifact shape are covered in [`tests/research/test_walk_forward.py`](/Users/y-yang/Developer/quant/tests/research/test_walk_forward.py).
+- Rebalance behavior now has a no-op regression for non-rankable universes in [`tests/strategies/test_multi_factor_parity.py`](/Users/y-yang/Developer/quant/tests/strategies/test_multi_factor_parity.py).
+- The main backtest CLI has a CI-oriented offline smoke test that verifies approved-parameter resolution and plotting suppression in [`tests/research/test_backtest_defaults.py`](/Users/y-yang/Developer/quant/tests/research/test_backtest_defaults.py).
+- The offline approval flow is covered end to end in [`tests/research/test_approved_params.py`](/Users/y-yang/Developer/quant/tests/research/test_approved_params.py) and [`tests/research/test_approve_cli.py`](/Users/y-yang/Developer/quant/tests/research/test_approve_cli.py).
+- The milestone is closed out by a small CI-friendly regression pack that runs without network access and exercises research artifacts, approval selection, strategy parity, and the backtest entrypoint together.
 
-Remaining for milestone completion:
+Milestone 6 closeout:
 
-- Add regression coverage for walk-forward outputs and parameter artifacts.
-- Add deeper rebalance-behavior coverage.
-- Confirm the core milestone workflows run cleanly in CI-oriented offline tests.
+- Added deeper rebalance-behavior coverage without changing strategy logic.
+- Added regression coverage for walk-forward outputs, parameter artifacts, and approval round-tripping.
+- Added offline workflow checks for the main backtest entrypoint so core research and paper-trading paths stay CI-safe.
 
 ### Milestone 7: Better universe and portfolio research
 

@@ -1,7 +1,11 @@
-from io import StringIO
 import json
+from io import StringIO
 from pathlib import Path
+import sys
 
+import pandas as pd
+
+import src.main as main
 from src.main import resolve_multi_factor_strategy_kwargs, resolve_multi_factor_weights, render_backtest_results
 from src.paper.bot import _resolve_signal_weights
 
@@ -106,3 +110,64 @@ def test_render_backtest_results_includes_turnover_metrics(capsys):
     assert "Rebalance Count : 4" in rendered
     assert "Position Changes: 6" in rendered
     assert "Turnover Ratio  : 1.5000" in rendered
+
+
+def test_main_multi_factor_offline_smoke_uses_approved_params_and_skips_plot(monkeypatch, tmp_path: Path, capsys):
+    write_approved_params(tmp_path, {"mom": 0.25, "vol": 0.75, "rev": 0.5})
+    monkeypatch.setattr(main, "DEFAULT_ARTIFACT_DIR", tmp_path)
+    monkeypatch.setattr(main, "get_topix_top_10", lambda: ["AAA.T", "BBB.T"])
+
+    fetch_calls = []
+
+    def fake_fetch_universe(symbols, start, end):
+        fetch_calls.append({"symbols": symbols, "start": start, "end": end})
+        return {symbol: pd.DataFrame({"Close": [100.0, 101.0, 102.0]}) for symbol in symbols}
+
+    monkeypatch.setattr(main, "fetch_universe", fake_fetch_universe)
+
+    captured = {}
+
+    class FakeCerebro:
+        def plot(self, *args, **kwargs):  # pragma: no cover - sanity guard
+            raise AssertionError("plot should not be called when --no-plot is set")
+
+    def fake_run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_000_000.0):
+        captured["data_symbols"] = sorted(data_dfs)
+        captured["strategy_class"] = strategy_class.__name__
+        captured["kwargs_dict"] = kwargs_dict
+        captured["initial_cash"] = initial_cash
+        return (
+            {
+                "final_value": 1_010_000.0,
+                "sharpe": 0.8,
+                "max_drawdown": 2.5,
+                "rebalance_count": 3,
+                "position_change_count": 5,
+                "turnover_ratio": 0.6,
+            },
+            FakeCerebro(),
+        )
+
+    monkeypatch.setattr(main, "run_with_logging", fake_run_with_logging)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--strategy", "multi", "--universe", "--no-plot"])
+
+    exit_code = main.main()
+
+    output = capsys.readouterr().out
+    assert exit_code is None
+    assert "Fetching data for 2 symbols from 2023-01-01 to 2024-01-01" in output
+    assert captured["data_symbols"] == ["AAA.T", "BBB.T"]
+    assert captured["strategy_class"] == "UniversalMultiFactor"
+    assert captured["kwargs_dict"] == {
+        "weight_mom": 0.25,
+        "weight_vol": 0.75,
+        "weight_rev": 0.5,
+    }
+    assert captured["initial_cash"] == 1_000_000.0
+    assert fetch_calls == [
+        {
+            "symbols": ["AAA.T", "BBB.T"],
+            "start": "2023-01-01",
+            "end": "2024-01-01",
+        }
+    ]

@@ -119,6 +119,36 @@ def test_rebalance_uses_shared_ranked_top_n():
     assert set(closes).isdisjoint(set(expected["symbol"].tolist()))
 
 
+def test_rebalance_is_noop_when_visible_universe_is_not_rankable():
+    data = {
+        "AAA.T": make_df([100 + i for i in range(50)]),
+        "BBB.T": make_df([200 + i for i in range(50)]),
+    }
+
+    strategy = run_strategy_with_history(
+        data,
+        lookback_mom=90,
+        lookback_vol=20,
+        lookback_rev=20,
+        weight_mom=0.5,
+        weight_vol=1.0,
+        weight_rev=0.5,
+        top_n=2,
+    )
+
+    closes = []
+    targets = []
+    strategy.close = lambda data=None: closes.append(data._name if data is not None else None)
+    strategy.order_target_percent = lambda data=None, target=0.0: targets.append((data._name, round(target, 4)))
+
+    assert strategy._score_visible_universe().empty
+
+    strategy.rebalance()
+
+    assert closes == []
+    assert targets == []
+
+
 def test_shared_strategy_and_paper_paths_match_under_same_weights():
     data = {
         "AAA.T": make_df([100] * 70 + list(range(100, 110)) + list(range(150, 130, -1))),
