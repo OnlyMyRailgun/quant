@@ -20,6 +20,8 @@ class UniversalMultiFactor(bt.Strategy):
         weight_vol=1.0,      # Weight of low volatility factor (higher score mapped to lower vol)
         weight_rev=1.0,      # Weight of mean reversion factor (higher score mapped to biggest dip)
         top_n=3,             # Top N to hold
+        buy_rank_threshold=None,
+        sell_rank_threshold=None,
     )
 
     def __init__(self):
@@ -93,20 +95,46 @@ class UniversalMultiFactor(bt.Strategy):
             lookback_rev=self.p.lookback_rev,
         )
 
+    def _resolve_rank_thresholds(self) -> tuple[int, int]:
+        buy_rank_threshold = self.p.buy_rank_threshold or self.p.top_n
+        sell_rank_threshold = self.p.sell_rank_threshold or self.p.top_n
+        if buy_rank_threshold > sell_rank_threshold:
+            raise ValueError("buy_rank_threshold cannot exceed sell_rank_threshold")
+        return buy_rank_threshold, sell_rank_threshold
+
     def rebalance(self):
         ranked = self._score_visible_universe()
         if ranked.empty:
             return
 
+        buy_rank_threshold, sell_rank_threshold = self._resolve_rank_thresholds()
         data_by_symbol = {data._name: data for data in self.datas}
-        top_symbols = ranked.head(self.p.top_n)["symbol"].tolist()
-        top_symbol_set = set(top_symbols)
-        top_stocks = [data_by_symbol[symbol] for symbol in top_symbols if symbol in data_by_symbol]
-        
+        rank_by_symbol = dict(zip(ranked["symbol"], ranked["rank"]))
+
+        held_symbols = {
+            data._name
+            for data in self.datas
+            if self.getposition(data).size > 0
+        }
+        keep_symbols = [
+            symbol for symbol in ranked["symbol"].tolist()
+            if symbol in held_symbols and rank_by_symbol.get(symbol, math.inf) <= sell_rank_threshold
+        ]
+        entry_symbols = [
+            symbol for symbol in ranked["symbol"].tolist()
+            if symbol not in held_symbols and rank_by_symbol.get(symbol, math.inf) <= buy_rank_threshold
+        ]
+
+        target_symbols = keep_symbols[: self.p.top_n]
+        remaining_slots = max(self.p.top_n - len(target_symbols), 0)
+        target_symbols.extend(entry_symbols[:remaining_slots])
+        target_symbol_set = set(target_symbols)
+        top_stocks = [data_by_symbol[symbol] for symbol in target_symbols if symbol in data_by_symbol]
+
         # 5. Liquidate losers
         for d in self.datas:
             pos = self.getposition(d)
-            if pos.size > 0 and d._name not in top_symbol_set:
+            if pos.size > 0 and d._name not in target_symbol_set:
                 self.close(data=d)
                 
         # 6. Reallocate to winners
