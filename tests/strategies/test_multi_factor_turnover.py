@@ -1,6 +1,7 @@
 import backtrader as bt
 import pandas as pd
 
+from src.engine.runner import run_backtest
 from src.strategies.multi_factor import UniversalMultiFactor
 
 
@@ -136,3 +137,84 @@ def test_rebalance_caps_target_holdings_at_top_n():
 
     assert len(targets) == 2
     assert [symbol for symbol, _ in targets] == ["BBB.T", "AAA.T"]
+
+
+def test_rebalance_tracks_turnover_metrics_from_position_changes():
+    strategy = run_strategy_with_history(
+        {
+            "AAA.T": make_df([100] * 100),
+            "BBB.T": make_df([100] * 100),
+            "CCC.T": make_df([100] * 100),
+            "DDD.T": make_df([100] * 100),
+        },
+        top_n=2,
+        buy_rank_threshold=2,
+        sell_rank_threshold=3,
+    )
+    strategy._score_visible_universe = lambda: make_ranked(["CCC.T", "DDD.T", "BBB.T", "AAA.T"])
+    strategy.getposition = lambda data: PositionStub(10 if data._name == "AAA.T" else 0)
+    strategy.rebalance_count = 0
+    strategy.position_change_count = 0
+    strategy.turnover_ratio = 0.0
+
+    strategy.close = lambda data=None: None
+    strategy.order_target_percent = lambda data=None, target=0.0: None
+
+    strategy.rebalance()
+
+    assert strategy.rebalance_count == 1
+    assert strategy.position_change_count == 3
+    assert strategy.turnover_ratio == 3.0
+
+
+def test_buffered_strategy_has_lower_turnover_than_default_path():
+    data_by_symbol = {
+        "AAA.T": make_df([100] * 100),
+        "BBB.T": make_df([100] * 100),
+        "CCC.T": make_df([100] * 100),
+        "DDD.T": make_df([100] * 100),
+    }
+    default_strategy = run_strategy_with_history(data_by_symbol, top_n=2)
+    default_strategy._score_visible_universe = lambda: make_ranked(["CCC.T", "DDD.T", "AAA.T", "BBB.T"])
+    default_strategy.getposition = lambda data: PositionStub(10 if data._name == "AAA.T" else 0)
+    default_strategy.rebalance_count = 0
+    default_strategy.position_change_count = 0
+    default_strategy.turnover_ratio = 0.0
+    default_strategy.close = lambda data=None: None
+    default_strategy.order_target_percent = lambda data=None, target=0.0: None
+
+    buffered_strategy = run_strategy_with_history(
+        data_by_symbol,
+        top_n=2,
+        buy_rank_threshold=2,
+        sell_rank_threshold=3,
+    )
+    buffered_strategy._score_visible_universe = lambda: make_ranked(["CCC.T", "DDD.T", "AAA.T", "BBB.T"])
+    buffered_strategy.getposition = lambda data: PositionStub(10 if data._name == "AAA.T" else 0)
+    buffered_strategy.rebalance_count = 0
+    buffered_strategy.position_change_count = 0
+    buffered_strategy.turnover_ratio = 0.0
+    buffered_strategy.close = lambda data=None: None
+    buffered_strategy.order_target_percent = lambda data=None, target=0.0: None
+
+    default_strategy.rebalance()
+    buffered_strategy.rebalance()
+
+    assert buffered_strategy.position_change_count < default_strategy.position_change_count
+
+
+def test_runner_metrics_include_turnover_fields():
+    result = run_backtest(
+        data_dfs={
+            "AAA.T": make_df([100] * 100),
+            "BBB.T": make_df([100] * 100),
+            "CCC.T": make_df([100] * 100),
+        },
+        strategy_class=UniversalMultiFactor,
+    )
+
+    metrics = result["metrics"]
+
+    assert "rebalance_count" in metrics
+    assert "position_change_count" in metrics
+    assert "turnover_ratio" in metrics

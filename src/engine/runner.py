@@ -46,7 +46,10 @@ def run_backtest(data_dfs: dict[str, pd.DataFrame], strategy_class, initial_cash
         "final_value": cerebro.broker.getvalue(),
         "sharpe": strat.analyzers.sharpe.get_analysis().get('sharperatio', 0.0),
         "max_drawdown": strat.analyzers.drawdown.get_analysis().get('max', {}).get('drawdown', 0.0),
-        "total_return": strat.analyzers.returns.get_analysis().get('rtot', 0.0)
+        "total_return": strat.analyzers.returns.get_analysis().get('rtot', 0.0),
+        "rebalance_count": getattr(strat, "rebalance_count", 0),
+        "position_change_count": getattr(strat, "position_change_count", 0),
+        "turnover_ratio": getattr(strat, "turnover_ratio", 0.0),
     }
     
     return {"metrics": metrics, "cerebro": cerebro}

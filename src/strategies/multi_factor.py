@@ -26,6 +26,9 @@ class UniversalMultiFactor(bt.Strategy):
 
     def __init__(self):
         self.month = None
+        self.rebalance_count = 0
+        self.position_change_count = 0
+        self.turnover_ratio = 0.0
         
         self.inds = {d: {} for d in self.datas}
         
@@ -107,6 +110,7 @@ class UniversalMultiFactor(bt.Strategy):
         if ranked.empty:
             return
 
+        self.rebalance_count += 1
         buy_rank_threshold, sell_rank_threshold = self._resolve_rank_thresholds()
         data_by_symbol = {data._name: data for data in self.datas}
         rank_by_symbol = dict(zip(ranked["symbol"], ranked["rank"]))
@@ -130,11 +134,13 @@ class UniversalMultiFactor(bt.Strategy):
         target_symbols.extend(entry_symbols[:remaining_slots])
         target_symbol_set = set(target_symbols)
         top_stocks = [data_by_symbol[symbol] for symbol in target_symbols if symbol in data_by_symbol]
+        close_count = 0
 
         # 5. Liquidate losers
         for d in self.datas:
             pos = self.getposition(d)
             if pos.size > 0 and d._name not in target_symbol_set:
+                close_count += 1
                 self.close(data=d)
                 
         # 6. Reallocate to winners
@@ -142,3 +148,5 @@ class UniversalMultiFactor(bt.Strategy):
             target_weight = 0.95 / len(top_stocks)
             for d in top_stocks:
                 self.order_target_percent(data=d, target=target_weight)
+        self.position_change_count += close_count + len(top_stocks)
+        self.turnover_ratio = self.position_change_count / self.rebalance_count
