@@ -7,6 +7,7 @@ from src.research.approved_params import (
     approve_walk_forward_params,
     approve_best_walk_forward_run,
     load_approved_paper_trading_params,
+    resolve_approved_weight_values,
     select_best_walk_forward_run,
 )
 
@@ -147,3 +148,27 @@ def test_approve_best_walk_forward_run_selects_from_registry_and_writes_file(tmp
 
     assert approved["source_run_id"] == "wf-b"
     assert approved["weights"] == {"mom": 0.0, "vol": 1.0, "rev": 0.5}
+
+
+def test_resolve_approved_weight_values_merges_explicit_overrides_with_approved_values(tmp_path: Path):
+    approved_path = tmp_path / "paper_trade_params.json"
+    approved_path.write_text(
+        json.dumps(
+            {
+                "source_run_id": "wf-b",
+                "rebalance_date": "2022-07-01",
+                "weights": {"mom": 0.0, "vol": 1.0, "rev": 0.5},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolved = resolve_approved_weight_values(
+        artifact_dir=tmp_path,
+        weight_mom=1.0,
+        weight_vol=None,
+        weight_rev=None,
+        fallback=(1.0, 1.0, 1.0),
+    )
+
+    assert resolved == {"mom": 1.0, "vol": 1.0, "rev": 0.5}

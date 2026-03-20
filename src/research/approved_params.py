@@ -105,3 +105,22 @@ def load_approved_paper_trading_params(artifact_dir: Path) -> dict | None:
     if not approved_path.exists():
         return None
     return json.loads(approved_path.read_text(encoding="utf-8"))
+
+
+def resolve_approved_weight_values(
+    artifact_dir: Path | None,
+    weight_mom: float | None,
+    weight_vol: float | None,
+    weight_rev: float | None,
+    fallback: tuple[float, float, float],
+) -> dict[str, float]:
+    approved = None
+    if artifact_dir is not None:
+        approved = load_approved_paper_trading_params(Path(artifact_dir))
+
+    approved_weights = approved["weights"] if approved is not None else {}
+    return {
+        "mom": float(approved_weights.get("mom", fallback[0])) if weight_mom is None else weight_mom,
+        "vol": float(approved_weights.get("vol", fallback[1])) if weight_vol is None else weight_vol,
+        "rev": float(approved_weights.get("rev", fallback[2])) if weight_rev is None else weight_rev,
+    }

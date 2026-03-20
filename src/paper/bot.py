@@ -6,7 +6,7 @@ from datetime import datetime
 from tabulate import tabulate
 
 from src.research.artifacts import build_scoring_metadata, write_scoring_run
-from src.research.approved_params import load_approved_paper_trading_params
+from src.research.approved_params import resolve_approved_weight_values
 from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_MOM,
     DEFAULT_LOOKBACK_REV,
@@ -29,26 +29,18 @@ def _resolve_signal_weights(
     weight_vol: float | None,
     weight_rev: float | None,
 ) -> tuple[float, float, float]:
-    if weight_mom is not None and weight_vol is not None and weight_rev is not None:
-        return weight_mom, weight_vol, weight_rev
-
-    approved = None
-    if artifact_dir is not None:
-        approved = load_approved_paper_trading_params(Path(artifact_dir))
-
-    if approved is not None:
-        approved_weights = approved["weights"]
-        return (
-            float(approved_weights["mom"]) if weight_mom is None else weight_mom,
-            float(approved_weights["vol"]) if weight_vol is None else weight_vol,
-            float(approved_weights["rev"]) if weight_rev is None else weight_rev,
-        )
-
-    return (
-        DEFAULT_SIGNAL_WEIGHT_MOM if weight_mom is None else weight_mom,
-        DEFAULT_SIGNAL_WEIGHT_VOL if weight_vol is None else weight_vol,
-        DEFAULT_SIGNAL_WEIGHT_REV if weight_rev is None else weight_rev,
+    resolved = resolve_approved_weight_values(
+        artifact_dir=artifact_dir,
+        weight_mom=weight_mom,
+        weight_vol=weight_vol,
+        weight_rev=weight_rev,
+        fallback=(
+            DEFAULT_SIGNAL_WEIGHT_MOM,
+            DEFAULT_SIGNAL_WEIGHT_VOL,
+            DEFAULT_SIGNAL_WEIGHT_REV,
+        ),
     )
+    return resolved["mom"], resolved["vol"], resolved["rev"]
 
 
 def _build_signal_run(

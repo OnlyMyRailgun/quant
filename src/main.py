@@ -7,6 +7,8 @@ from src.strategies.sma_crossover import SmaCross
 from src.strategies.momentum_factor import CrossSectionalMomentum
 from src.strategies.multi_factor import UniversalMultiFactor
 from src.engine.commission import JapanStockCommission
+from src.research.approved_params import resolve_approved_weight_values
+from src.research.artifacts import DEFAULT_ARTIFACT_DIR
 
 
 def run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_000_000.0):
@@ -90,14 +92,34 @@ def run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_
     return metrics, cerebro
 
 
+def resolve_multi_factor_weights(
+    artifact_dir,
+    weight_mom,
+    weight_vol,
+    weight_rev,
+):
+    resolved = resolve_approved_weight_values(
+        artifact_dir=artifact_dir,
+        weight_mom=weight_mom,
+        weight_vol=weight_vol,
+        weight_rev=weight_rev,
+        fallback=(1.0, 1.0, 1.0),
+    )
+    return {
+        "weight_mom": resolved["mom"],
+        "weight_vol": resolved["vol"],
+        "weight_rev": resolved["rev"],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run Quant Backtest and Plot Results")
     parser.add_argument("--ticker", type=str, default=None, help="Specific ticker symbol (e.g. 7203.T)")
     parser.add_argument("--universe", action="store_true", help="Run on the full Top 10 TOPIX Universe")
     parser.add_argument("--strategy", type=str, choices=["sma", "momentum", "multi"], default="multi", help="Strategy to run")
-    parser.add_argument("--weight-mom", type=float, default=1.0, help="Weight for Momentum Factor")
-    parser.add_argument("--weight-vol", type=float, default=1.0, help="Weight for Low Volatility Factor")
-    parser.add_argument("--weight-rev", type=float, default=1.0, help="Weight for Mean Reversion Factor")
+    parser.add_argument("--weight-mom", type=float, default=None, help="Weight for Momentum Factor")
+    parser.add_argument("--weight-vol", type=float, default=None, help="Weight for Low Volatility Factor")
+    parser.add_argument("--weight-rev", type=float, default=None, help="Weight for Mean Reversion Factor")
     parser.add_argument("--start", type=str, default="2023-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default="2024-01-01", help="End date (YYYY-MM-DD)")
     parser.add_argument("--no-plot", action="store_true", help="Disable plotting (useful for CI)")
@@ -132,11 +154,12 @@ def main():
     
     kwargs = {}
     if args.strategy == "multi":
-        kwargs = {
-            "weight_mom": args.weight_mom,
-            "weight_vol": args.weight_vol,
-            "weight_rev": args.weight_rev
-        }
+        kwargs = resolve_multi_factor_weights(
+            artifact_dir=DEFAULT_ARTIFACT_DIR,
+            weight_mom=args.weight_mom,
+            weight_vol=args.weight_vol,
+            weight_rev=args.weight_rev,
+        )
 
     print(f"Running backtest using {selected_strategy.__name__} strategy with friction modeling...\n")
     print("=" * 50)
