@@ -1,64 +1,107 @@
 import sys
 import argparse
+from pathlib import Path
 import pandas as pd
 from datetime import datetime
 from tabulate import tabulate
 
-from src.data.universe import get_topix_top_10
-from src.data.bulk_loader import fetch_universe
-from src.paper.db import init_db, get_wallet_balance, fetch_pending_orders, place_pending_order, fill_order
+from src.research.artifacts import write_scoring_run
+from src.scoring.multi_factor import (
+    DEFAULT_LOOKBACK_MOM,
+    DEFAULT_LOOKBACK_REV,
+    DEFAULT_LOOKBACK_VOL,
+    score_universe,
+)
+from src.paper.db import DB_PATH, get_wallet_balance, place_pending_order
 from src.paper.notifier import send_daily_report
 import sqlite3
-from src.paper.db import DB_PATH
 
-def calculate_current_signals(data_dfs, top_n=3, weight_mom=1.0, weight_vol=1.0, weight_rev=1.0):
-    """
-    Translates the UniversalMultiFactor logic from Backtrader into a fast Pandas equivalent
-    for generating "Today's" live signals on the bleeding edge of the market.
-    """
-    latest_metrics = []
-    
-    for symbol, df in data_dfs.items():
-        if df.empty or len(df) < 90:
-            continue
-            
-        close = df['Close'].astype(float)
-        
-        # 1. Momentum (90 days ROC)
-        mom = (close.iloc[-1] - close.iloc[-90]) / close.iloc[-90]
-        
-        # 2. Volatility (20 days StdDev of 1-day returns)
-        daily_ret = close.pct_change()
-        vol = daily_ret.iloc[-20:].std()
-        
-        # 3. Mean Reversion (Distance from 20d SMA)
-        sma_20 = close.iloc[-20:].mean()
-        rev = (close.iloc[-1] - sma_20) / sma_20
-        
-        latest_metrics.append({
-            'symbol': symbol,
-            'price': close.iloc[-1],
-            'mom': mom,
-            'vol': vol,
-            'rev': rev
-        })
-        
-    metrics_df = pd.DataFrame(latest_metrics)
-    
-    # 4. Z-Score Cross-Sectional Normalization
-    z_mom = (metrics_df['mom'] - metrics_df['mom'].mean()) / metrics_df['mom'].std()
-    
-    # Invert Vol and Rev since lower is better
-    z_vol = -((metrics_df['vol'] - metrics_df['vol'].mean()) / metrics_df['vol'].std())
-    z_rev = -((metrics_df['rev'] - metrics_df['rev'].mean()) / metrics_df['rev'].std())
-    
-    metrics_df['total_score'] = (weight_mom * z_mom) + (weight_vol * z_vol) + (weight_rev * z_rev)
-    
-    # Select winners
-    winners = metrics_df.sort_values(by='total_score', ascending=False).head(top_n)
+
+def _build_signal_run(
+    data_dfs,
+    top_n=3,
+    weight_mom=1.0,
+    weight_vol=1.0,
+    weight_rev=1.0,
+    lookback_mom=DEFAULT_LOOKBACK_MOM,
+    lookback_vol=DEFAULT_LOOKBACK_VOL,
+    lookback_rev=DEFAULT_LOOKBACK_REV,
+):
+    ranked = score_universe(
+        data_dfs,
+        top_n=top_n,
+        weight_mom=weight_mom,
+        weight_vol=weight_vol,
+        weight_rev=weight_rev,
+        lookback_mom=lookback_mom,
+        lookback_vol=lookback_vol,
+        lookback_rev=lookback_rev,
+    )
+    metadata = {
+        "top_n": top_n,
+        "weights": {"mom": weight_mom, "vol": weight_vol, "rev": weight_rev},
+        "lookbacks": {
+            "mom": lookback_mom,
+            "vol": lookback_vol,
+            "rev": lookback_rev,
+        },
+        "universe": ranked["symbol"].tolist(),
+    }
+    return ranked, metadata
+
+
+def _with_legacy_factor_aliases(ranked: pd.DataFrame) -> pd.DataFrame:
+    winners = ranked.copy()
+    winners["mom"] = winners["mom_raw"]
+    winners["vol"] = winners["vol_raw"]
+    winners["rev"] = winners["rev_raw"]
     return winners
 
+
+def calculate_current_signals(
+    data_dfs,
+    top_n=3,
+    weight_mom=1.0,
+    weight_vol=1.0,
+    weight_rev=1.0,
+    lookback_mom=DEFAULT_LOOKBACK_MOM,
+    lookback_vol=DEFAULT_LOOKBACK_VOL,
+    lookback_rev=DEFAULT_LOOKBACK_REV,
+    artifact_dir: Path | None = None,
+):
+    """
+    Shared paper-trading scorer for generating today's live signals.
+
+    This delegates to the same ranking logic used by the research layer so
+    paper-trading recommendations stay aligned with backtests.
+    """
+    ranked, metadata = _build_signal_run(
+        data_dfs,
+        top_n=top_n,
+        weight_mom=weight_mom,
+        weight_vol=weight_vol,
+        weight_rev=weight_rev,
+        lookback_mom=lookback_mom,
+        lookback_vol=lookback_vol,
+        lookback_rev=lookback_rev,
+    )
+
+    if artifact_dir is not None:
+        winners = ranked.head(top_n)
+        write_scoring_run(
+            base_dir=Path(artifact_dir),
+            run_name="paper_signal",
+            metadata=metadata,
+            scores=ranked,
+            summary={"top_n": top_n, "winner_count": len(winners)},
+        )
+
+    return _with_legacy_factor_aliases(ranked.head(top_n))
+
 def generate_rebalance_orders():
+    from src.data.universe import get_topix_top_10
+    from src.data.bulk_loader import fetch_universe
+
     print("Fetching latest data from Yahoo Finance for live signal generation...")
     symbols = get_topix_top_10()
     # Need at least 150 days to ensure enough history for our indicators
@@ -166,6 +209,8 @@ def print_status():
     conn.close()
 
 if __name__ == "__main__":
+    from src.paper.db import fill_order, init_db
+
     init_db()
     
     parser = argparse.ArgumentParser(description="Daily Live Signal Generator & Paper Trading Hub")
