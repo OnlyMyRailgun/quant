@@ -1,19 +1,26 @@
 import argparse
+from dataclasses import asdict
 import sys
 from typing import TextIO
 import backtrader as bt
+import pandas as pd
 from src.data.bulk_loader import fetch_universe
 from src.data.universe import (
     format_unknown_universe_message,
     get_topix_top_10,
     get_universe,
 )
+from src.research.artifacts import (
+    DEFAULT_ARTIFACT_DIR,
+    build_screening_metadata,
+    write_screening_run,
+)
 from src.strategies.sma_crossover import SmaCross
 from src.strategies.momentum_factor import CrossSectionalMomentum
 from src.strategies.multi_factor import UniversalMultiFactor
 from src.engine.commission import JapanStockCommission
 from src.research.approved_params import resolve_approved_weight_values
-from src.research.artifacts import DEFAULT_ARTIFACT_DIR
+from src.research.screening import ScreeningRules, screen_universe
 
 
 def run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_000_000.0):
@@ -169,6 +176,21 @@ def render_backtest_results(
     print("=" * 40 + "\n", file=output)
 
 
+def _build_screening_decisions_frame(candidate_symbols, by_symbol):
+    rows = []
+    for symbol in candidate_symbols:
+        record = by_symbol[symbol]
+        rows.append(
+            {
+                "symbol": symbol,
+                "eligible": record.get("eligible", False),
+                "reasons": record.get("reasons", []),
+                "metrics": record.get("metrics", {}),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run Quant Backtest and Plot Results")
     parser.add_argument("--ticker", type=str, default=None, help="Specific ticker symbol (e.g. 7203.T)")
@@ -238,6 +260,45 @@ def main():
             artifact_run_name="backtest_rebalance",
             universe_name=selected_universe_name,
         )
+
+    if selected_universe_name is not None:
+        screening_rules = ScreeningRules()
+        screening_result = screen_universe(
+            candidate_symbols=symbols,
+            data_dfs=data_dfs,
+            start=args.start,
+            end=args.end,
+            screen_as_of=args.end,
+            screening_rules=screening_rules,
+        )
+        screening_summary = screening_result["summary"]
+        print(
+            "Screening summary: "
+            f"requested={screening_summary['requested_symbol_count']} "
+            f"eligible={screening_summary['eligible_symbol_count']} "
+            f"screened_out={screening_summary['screened_out_symbol_count']}"
+        )
+
+        screening_metadata = build_screening_metadata(
+            start=args.start,
+            end=args.end,
+            screen_as_of=args.end,
+            universe_name=selected_universe_name,
+            screening_rules=asdict(screening_rules),
+        )
+        write_screening_run(
+            base_dir=DEFAULT_ARTIFACT_DIR,
+            run_name="universe_screening",
+            metadata=screening_metadata,
+            decisions=_build_screening_decisions_frame(symbols, screening_result["by_symbol"]),
+            summary=screening_summary,
+        )
+
+        eligible_symbols = screening_result["eligible_symbols"]
+        if not eligible_symbols:
+            print("No symbols remained after screening. Please choose a larger universe or relax the screening rules.")
+            sys.exit(1)
+        data_dfs = {symbol: data_dfs[symbol] for symbol in eligible_symbols if symbol in data_dfs}
 
     print(f"Running backtest using {selected_strategy.__name__} strategy with friction modeling...\n")
     print("=" * 50)

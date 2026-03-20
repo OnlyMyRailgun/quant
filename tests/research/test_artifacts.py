@@ -7,8 +7,10 @@ import pandas as pd
 from src.paper.bot import calculate_current_signals
 from src.research.artifacts import (
     build_scoring_metadata,
+    build_screening_metadata,
     build_walk_forward_metadata,
     write_scoring_run,
+    write_screening_run,
     write_walk_forward_run,
 )
 from src.research.registry import append_run_record, create_run_id
@@ -115,6 +117,104 @@ def test_build_walk_forward_metadata_includes_universe_fields_when_provided():
         "universe_name": "topix_top_10",
         "universe_symbols": ["AAA.T", "BBB.T"],
     }
+
+
+def test_write_screening_run_persists_decisions_and_summary(tmp_path: Path):
+    decisions = pd.DataFrame(
+        [
+            {
+                "symbol": "AAA.T",
+                "eligible": True,
+                "reasons": [],
+                "history_days": 252,
+                "missing_ratio": 0.01,
+                "latest_close": 100.0,
+                "recent_trading_day_ratio": 1.0,
+                "recent_inactive_day_ratio": 0.0,
+            },
+            {
+                "symbol": "BBB.T",
+                "eligible": False,
+                "reasons": ["low_latest_close", "high_missing_ratio"],
+                "history_days": 20,
+                "missing_ratio": 0.4,
+                "latest_close": 4.5,
+                "recent_trading_day_ratio": 0.5,
+                "recent_inactive_day_ratio": 0.5,
+            },
+        ]
+    )
+
+    metadata = build_screening_metadata(
+        start="2024-01-01",
+        end="2024-03-31",
+        screen_as_of="2024-03-31",
+        universe_name="topix_top_30",
+        screening_rules={
+            "min_history_days": 252,
+            "max_missing_ratio": 0.1,
+            "min_latest_close": 5.0,
+            "recent_window_days": 20,
+            "min_recent_trading_day_ratio": 0.8,
+            "max_recent_inactive_day_ratio": 0.2,
+        },
+    )
+
+    paths = write_screening_run(
+        base_dir=tmp_path,
+        run_name="universe_screening",
+        metadata=metadata,
+        decisions=decisions,
+        summary={
+            "requested_symbol_count": 2,
+            "eligible_symbol_count": 1,
+            "screened_out_symbol_count": 1,
+            "eligibility_ratio": 0.5,
+            "screened_out_low_latest_close_count": 1,
+            "screened_out_high_missing_ratio_count": 1,
+        },
+        run_id="universe_screening-20260320T010203Z-deadbeef",
+        timestamp="20260320T010203Z",
+        created_at="20260320T010203Z",
+    )
+
+    assert paths["run_dir"] == tmp_path / "universe_screening" / "20260320T010203Z-20260320T010203Z-deadbeef"
+    assert paths["metadata"].exists()
+    assert paths["decisions"].exists()
+    assert paths["summary"].exists()
+
+    saved_metadata = json.loads(paths["metadata"].read_text(encoding="utf-8"))
+    assert saved_metadata["run_name"] == "universe_screening"
+    assert saved_metadata["universe_name"] == "topix_top_30"
+    assert saved_metadata["screen_as_of"] == "2024-03-31"
+    assert saved_metadata["screening_rules"] == {
+        "min_history_days": 252,
+        "max_missing_ratio": 0.1,
+        "min_latest_close": 5.0,
+        "recent_window_days": 20,
+        "min_recent_trading_day_ratio": 0.8,
+        "max_recent_inactive_day_ratio": 0.2,
+    }
+
+    saved_decisions = pd.read_csv(paths["decisions"])
+    assert saved_decisions["symbol"].tolist() == ["AAA.T", "BBB.T"]
+    assert saved_decisions["eligible"].tolist() == [True, False]
+    assert saved_decisions.loc[1, "reasons"] == "['low_latest_close', 'high_missing_ratio']"
+
+    saved_summary = json.loads(paths["summary"].read_text(encoding="utf-8"))
+    assert saved_summary["requested_symbol_count"] == 2
+    assert saved_summary["eligible_symbol_count"] == 1
+    assert saved_summary["screened_out_symbol_count"] == 1
+    assert saved_summary["eligibility_ratio"] == 0.5
+
+    registry_lines = (tmp_path / "registry.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(registry_lines) == 1
+    registry_entry = json.loads(registry_lines[0])
+    assert registry_entry["run_id"] == "universe_screening-20260320T010203Z-deadbeef"
+    assert registry_entry["run_name"] == "universe_screening"
+    assert registry_entry["metadata"] == str(paths["metadata"])
+    assert registry_entry["decisions"] == str(paths["decisions"])
+    assert registry_entry["summary"] == str(paths["summary"])
 
 
 def test_write_walk_forward_run_persists_diagnostics_in_summary(tmp_path: Path):
