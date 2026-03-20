@@ -26,6 +26,31 @@ def test_score_universe_ranks_symbols_by_total_score():
     assert list(result["is_top_n"]) == [True, True, False]
 
 
+def test_score_universe_exposes_weighted_factor_contributions():
+    data = {
+        "AAA.T": make_df([100] * 70 + list(range(100, 110)) + list(range(150, 130, -1))),
+        "BBB.T": make_df([120] * 70 + list(range(120, 110, -1)) + [80] * 20),
+        "CCC.T": make_df([100] * 100),
+    }
+
+    result = score_universe(data, top_n=2, weight_mom=1.5, weight_vol=0.5, weight_rev=2.0)
+
+    for contribution, weight, zscore in (
+        ("mom_contribution", 1.5, "mom_z"),
+        ("vol_contribution", 0.5, "vol_z"),
+        ("rev_contribution", 2.0, "rev_z"),
+    ):
+        assert contribution in result.columns
+        expected = result[zscore] * weight
+        assert result[contribution].round(10).tolist() == expected.round(10).tolist()
+
+    expected_total = (
+        result["mom_contribution"] + result["vol_contribution"] + result["rev_contribution"]
+    )
+    assert result["total_score"].round(10).tolist() == expected_total.round(10).tolist()
+    assert result["symbol"].tolist() == ["AAA.T", "CCC.T", "BBB.T"]
+
+
 def test_score_universe_skips_symbols_with_insufficient_history():
     data = {
         "AAA.T": make_df([100] * 100),

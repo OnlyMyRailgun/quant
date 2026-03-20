@@ -144,10 +144,13 @@ def score_universe(
         record["mom_z"] = mom_z[i]
         record["vol_z"] = vol_z[i]
         record["rev_z"] = rev_z[i]
+        record["mom_contribution"] = weight_mom * mom_z[i]
+        record["vol_contribution"] = weight_vol * vol_z[i]
+        record["rev_contribution"] = weight_rev * rev_z[i]
         record["total_score"] = (
-            (weight_mom * mom_z[i])
-            + (weight_vol * vol_z[i])
-            + (weight_rev * rev_z[i])
+            record["mom_contribution"]
+            + record["vol_contribution"]
+            + record["rev_contribution"]
         )
 
     ranked = pd.DataFrame(records)
