@@ -4,7 +4,7 @@
 
 ## Goal
 
-Add a reproducible universe-screening layer that can narrow a broader candidate universe into a smaller research universe before ranking, walk-forward optimization, and paper-signal generation run.
+Add a reproducible universe-screening layer that can narrow a broader candidate universe into a smaller research universe before ranking, backtests, and research optimization run.
 
 The system should answer two different questions cleanly:
 
@@ -96,14 +96,14 @@ The new pipeline becomes:
 2. market-data loading
 3. eligibility screening
 4. eligible-universe handoff
-5. ranking / walk-forward / paper-signal generation
+5. ranking / research execution
 
 In practical terms:
 
 - `src/data/universe.py` continues to define candidate universes.
 - `src/data/bulk_loader.py` continues to load and cache raw market data.
-- a new `screening` module evaluates symbol eligibility using requested date ranges plus loaded price history.
-- optimization and backtest entry points can optionally call the screen before ranking.
+- a new `screening` module evaluates symbol eligibility using requested date ranges, an explicit `screen_as_of` boundary, and loaded price history available up to that boundary.
+- research and backtest entry points can optionally call the screen before ranking.
 
 This keeps each layer focused:
 
@@ -122,13 +122,13 @@ The screening layer should take:
 - `data_dfs`
 - `start`
 - `end`
+- `screen_as_of`
 - `screening_rules`
 
 Optional future inputs:
 
 - `fundamentals_by_symbol`
 - `liquidity_overrides`
-- `screen_as_of`
 
 ### Outputs
 
@@ -179,6 +179,25 @@ The summary should include counts such as:
 - `eligibility_ratio`
 - reason-level counts such as `screened_out_insufficient_history_count`
 
+## Point-in-Time Rule
+
+Universe screening must be point-in-time aware whenever it gates a historical research run.
+
+That means:
+
+- every screening decision is evaluated as of an explicit `screen_as_of` timestamp
+- only data at or before `screen_as_of` may be used to decide eligibility
+- metrics like `latest_close`, recent activity, and missingness must be computed from slices truncated at `screen_as_of`
+
+This is mandatory because otherwise the screening layer would leak future information into universe formation.
+
+Examples:
+
+- for a one-shot research or backtest run, `screen_as_of` can default to `end`
+- for a future walk-forward integration, screening must run separately per historical decision boundary using that window's own `screen_as_of`
+
+Phase 1 should not silently apply full-range screening ahead of walk-forward windows. Until per-window point-in-time screening is implemented, walk-forward integration remains deferred.
+
 ## Rule Set for Phase 1
 
 The default rules should remain conservative and easy to interpret.
@@ -191,13 +210,13 @@ This protects the scorer from quietly dropping names later because they lack eno
 
 ### 2. Missing-Data Threshold
 
-Reject symbols whose requested-range slice is too sparse.
+Reject symbols whose point-in-time-available slice is too sparse.
 
 This makes the research universe more stable and reduces cases where a symbol technically loaded but is not usable for consistent evaluation.
 
 ### 3. Minimum Latest Close
 
-Reject symbols trading below a configured minimum close threshold.
+Reject symbols whose latest close as of `screen_as_of` is below a configured minimum threshold.
 
 This acts as a simple tradability and data-quality proxy, especially useful when broadening the candidate universe.
 
@@ -238,17 +257,17 @@ Phase 1 does not need to rewrite every summary immediately, but the screening re
 
 ### Recommended Phase 1 Integration Points
 
-- research and optimization entry points
+- one-shot research and optimization entry points
 - backtest entry points that operate on named universes
 
 This gives the screening system immediate value for:
 
-- walk-forward research
 - larger-universe experimentation
 - future reproducible universe artifacts
 
 ### Deliberately Deferred Integration
 
+- walk-forward research until per-window point-in-time screening is wired
 - live paper-trading signal generation
 
 Paper trading already depends on approved parameters and current signal generation. Screening should only reach that path once the research-side workflow is stable and artifact conventions are clear.
