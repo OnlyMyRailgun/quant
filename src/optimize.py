@@ -116,6 +116,15 @@ def evaluate_benchmark_return(
     return {"return_pct": round(((end_price / start_price) - 1.0) * 100, 4)}
 
 
+def _format_contributor_summary(contributors: list[dict[str, object]]) -> str:
+    if not contributors:
+        return "n/a"
+    return ", ".join(
+        f"{item['symbol']} ({float(item['return_pct']):.4f}%)"
+        for item in contributors
+    )
+
+
 def run_walk_forward_optimization(
     data_dfs: dict[str, pd.DataFrame],
     start: str,
@@ -215,6 +224,12 @@ def run_walk_forward_optimization(
         print(f"N225 benchmark return total % : {summary['n225_return_pct']:.4f}")
         print(f"Walk-forward excess vs N225 % : {summary['walk_forward_excess_vs_n225_pct']:.4f}")
     print(f"Walk-forward return total %    : {summary['walk_forward_return_pct']:.4f}")
+    if "avg_hit_rate" in summary and summary["avg_hit_rate"] is not None:
+        print(f"Average window hit rate        : {summary['avg_hit_rate']:.4f}")
+    if "top_contributors" in summary:
+        print(f"Top contributors              : {_format_contributor_summary(summary['top_contributors'])}")
+    if "bottom_contributors" in summary:
+        print(f"Bottom contributors           : {_format_contributor_summary(summary['bottom_contributors'])}")
     if "artifacts" in result:
         print(f"Artifacts written to           : {result['artifacts']['run_dir']}")
 

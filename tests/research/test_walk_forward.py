@@ -106,8 +106,22 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
         ("2021-04-01", "2021-09-30", (0.0, 1.0, 0.0)): {"return_pct": 4.0, "sharpe": 0.3},
     }
     validation_scores = {
-        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {"return_pct": 1.5, "sharpe": 0.15},
-        ("2021-10-01", "2021-12-31", (0.0, 1.0, 0.0)): {"return_pct": 2.5, "sharpe": 0.25},
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+            "return_pct": 1.5,
+            "sharpe": 0.15,
+            "symbol_returns": [
+                {"symbol": "AAA.T", "return_pct": 2.0},
+                {"symbol": "BBB.T", "return_pct": -0.5},
+            ],
+        },
+        ("2021-10-01", "2021-12-31", (0.0, 1.0, 0.0)): {
+            "return_pct": 2.5,
+            "sharpe": 0.25,
+            "symbol_returns": [
+                {"symbol": "AAA.T", "return_pct": 1.5},
+                {"symbol": "CCC.T", "return_pct": 1.0},
+            ],
+        },
     }
     baseline_scores = {
         ("2021-07-01", "2021-09-30"): {"return_pct": 1.0, "sharpe": 0.1},
@@ -168,6 +182,27 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
     assert result["weights"]["one_shot_return_pct"].tolist() == [1.8, 1.4]
     assert result["weights"]["topx_return_pct"].tolist() == [0.8, 1.1]
     assert result["weights"]["n225_return_pct"].tolist() == [0.5, 1.6]
+    assert result["weights"]["hit_rate"].tolist() == [0.5, 1.0]
+    assert result["weights"]["top_contributors"].tolist() == [
+        [
+            {"symbol": "AAA.T", "return_pct": 2.0},
+            {"symbol": "BBB.T", "return_pct": -0.5},
+        ],
+        [
+            {"symbol": "AAA.T", "return_pct": 1.5},
+            {"symbol": "CCC.T", "return_pct": 1.0},
+        ],
+    ]
+    assert result["weights"]["bottom_contributors"].tolist() == [
+        [
+            {"symbol": "BBB.T", "return_pct": -0.5},
+            {"symbol": "AAA.T", "return_pct": 2.0},
+        ],
+        [
+            {"symbol": "CCC.T", "return_pct": 1.0},
+            {"symbol": "AAA.T", "return_pct": 1.5},
+        ],
+    ]
     assert result["summary"] == {
         "window_count": 2,
         "baseline_return_pct": 2.2,
@@ -179,6 +214,17 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
         "n225_return_pct": 2.1,
         "walk_forward_excess_vs_topx_pct": 2.1,
         "walk_forward_excess_vs_n225_pct": 1.9,
+        "avg_hit_rate": 0.75,
+        "top_contributors": [
+            {"symbol": "AAA.T", "return_pct": 3.5},
+            {"symbol": "CCC.T", "return_pct": 1.0},
+            {"symbol": "BBB.T", "return_pct": -0.5},
+        ],
+        "bottom_contributors": [
+            {"symbol": "BBB.T", "return_pct": -0.5},
+            {"symbol": "CCC.T", "return_pct": 1.0},
+            {"symbol": "AAA.T", "return_pct": 3.5},
+        ],
     }
 
 
@@ -209,6 +255,9 @@ def test_run_walk_forward_optimization_prints_one_shot_comparison(monkeypatch, c
                 "n225_return_pct": 1.1,
                 "walk_forward_excess_vs_topx_pct": 0.9,
                 "walk_forward_excess_vs_n225_pct": 0.7,
+                "avg_hit_rate": 0.5,
+                "top_contributors": [{"symbol": "AAA.T", "return_pct": 1.2}],
+                "bottom_contributors": [{"symbol": "BBB.T", "return_pct": -0.4}],
             },
         }
 
@@ -229,6 +278,8 @@ def test_run_walk_forward_optimization_prints_one_shot_comparison(monkeypatch, c
     assert "Walk-forward return total %" in output
     assert "TOPX benchmark return total %" in output
     assert "N225 benchmark return total %" in output
+    assert "Average window hit rate" in output
+    assert "Top contributors" in output
 
 
 def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator(
@@ -276,6 +327,9 @@ def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator
         "walk_forward_return_pct": 1.8,
         "one_shot_active_return_pct": 0.4,
         "active_return_pct": 0.8,
+        "avg_hit_rate": None,
+        "top_contributors": [],
+        "bottom_contributors": [],
     }
 
     artifacts = result["artifacts"]

@@ -5,7 +5,12 @@ from pathlib import Path
 import pandas as pd
 
 from src.paper.bot import calculate_current_signals
-from src.research.artifacts import build_scoring_metadata, build_walk_forward_metadata, write_scoring_run
+from src.research.artifacts import (
+    build_scoring_metadata,
+    build_walk_forward_metadata,
+    write_scoring_run,
+    write_walk_forward_run,
+)
 from src.research.registry import append_run_record, create_run_id
 from src.scoring.multi_factor import score_universe
 
@@ -110,6 +115,44 @@ def test_build_walk_forward_metadata_includes_universe_fields_when_provided():
         "universe_name": "topix_top_10",
         "universe_symbols": ["AAA.T", "BBB.T"],
     }
+
+
+def test_write_walk_forward_run_persists_diagnostics_in_summary(tmp_path: Path):
+    weights = pd.DataFrame(
+        [
+            {
+                "rebalance_date": "2021-07-01",
+                "weight_mom": 1.0,
+                "weight_vol": 0.0,
+                "weight_rev": 0.0,
+                "hit_rate": 0.5,
+                "top_contributors": [{"symbol": "AAA.T", "return_pct": 2.0}],
+                "bottom_contributors": [{"symbol": "BBB.T", "return_pct": -0.5}],
+            }
+        ]
+    )
+
+    paths = write_walk_forward_run(
+        base_dir=tmp_path,
+        metadata={"start": "2021-01-01", "end": "2021-12-31"},
+        weights=weights,
+        summary={
+            "window_count": 1,
+            "baseline_return_pct": 1.0,
+            "walk_forward_return_pct": 1.8,
+            "avg_hit_rate": 0.5,
+            "top_contributors": [{"symbol": "AAA.T", "return_pct": 2.0}],
+            "bottom_contributors": [{"symbol": "BBB.T", "return_pct": -0.5}],
+        },
+    )
+
+    summary = json.loads(paths["summary"].read_text(encoding="utf-8"))
+    saved_weights = pd.read_csv(paths["weights"])
+
+    assert summary["avg_hit_rate"] == 0.5
+    assert summary["top_contributors"] == [{"symbol": "AAA.T", "return_pct": 2.0}]
+    assert summary["bottom_contributors"] == [{"symbol": "BBB.T", "return_pct": -0.5}]
+    assert "hit_rate" in saved_weights.columns
 
 
 def test_append_run_record_is_append_only_jsonl(tmp_path: Path):
