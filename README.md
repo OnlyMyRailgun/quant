@@ -312,8 +312,7 @@ Completed so far:
 
 Still missing for milestone closeout:
 
-- broader configured universes beyond the current small named set
-- stronger research outputs around larger-universe behavior
+- stronger research outputs around larger-universe behavior and lifecycle states
 
 ### Milestone X: Research Platform Foundation
 
