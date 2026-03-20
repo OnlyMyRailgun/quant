@@ -95,6 +95,8 @@ def run_walk_forward_experiment(
     evaluate_training_window,
     evaluate_validation_window,
     evaluate_baseline_window,
+    evaluate_one_shot_training_window=None,
+    evaluate_one_shot_validation_window=None,
     artifact_dir=None,
 ) -> dict[str, object]:
     windows = build_walk_forward_windows(
@@ -107,7 +109,16 @@ def run_walk_forward_experiment(
 
     rows: list[dict[str, object]] = []
     baseline_total = 0.0
+    one_shot_total = 0.0
     walk_forward_total = 0.0
+    one_shot_best_weights: dict[str, float] | None = None
+
+    if evaluate_one_shot_training_window is not None:
+        one_shot_leaderboard = select_best_weights(
+            weight_grid=weight_grid,
+            evaluate=evaluate_one_shot_training_window,
+        )
+        one_shot_best_weights = one_shot_leaderboard["best"]["weights"]
 
     for window in windows:
         leaderboard = select_best_weights(
@@ -122,6 +133,26 @@ def run_walk_forward_experiment(
         )
         validation_metrics = evaluate_validation_window(window, weight_tuple)
         baseline_metrics = evaluate_baseline_window(window)
+        one_shot_return_pct = None
+
+        if one_shot_best_weights is not None:
+            if evaluate_one_shot_validation_window is None:
+                raise ValueError(
+                    "evaluate_one_shot_validation_window is required when "
+                    "evaluate_one_shot_training_window is provided"
+                )
+
+            one_shot_weight_tuple = (
+                one_shot_best_weights["mom"],
+                one_shot_best_weights["vol"],
+                one_shot_best_weights["rev"],
+            )
+            one_shot_metrics = evaluate_one_shot_validation_window(
+                window,
+                one_shot_weight_tuple,
+            )
+            one_shot_return_pct = float(one_shot_metrics["return_pct"])
+            one_shot_total += one_shot_return_pct
 
         baseline_total += float(baseline_metrics["return_pct"])
         walk_forward_total += float(validation_metrics["return_pct"])
@@ -139,6 +170,7 @@ def run_walk_forward_experiment(
                 "train_return_pct": leaderboard["best"]["return_pct"],
                 "validation_return_pct": float(validation_metrics["return_pct"]),
                 "baseline_return_pct": float(baseline_metrics["return_pct"]),
+                "one_shot_return_pct": one_shot_return_pct,
             }
         )
 
@@ -149,6 +181,9 @@ def run_walk_forward_experiment(
         "walk_forward_return_pct": round(walk_forward_total, 10),
         "active_return_pct": round(walk_forward_total - baseline_total, 10),
     }
+    if one_shot_best_weights is not None:
+        summary["one_shot_return_pct"] = round(one_shot_total, 10)
+        summary["one_shot_active_return_pct"] = round(one_shot_total - baseline_total, 10)
     metadata = {
         "start": start,
         "end": end,
@@ -156,6 +191,8 @@ def run_walk_forward_experiment(
         "validation_months": validation_months,
         "step_months": step_months,
     }
+    if one_shot_best_weights is not None:
+        metadata["one_shot_weights"] = one_shot_best_weights
 
     result: dict[str, object] = {
         "windows": windows,

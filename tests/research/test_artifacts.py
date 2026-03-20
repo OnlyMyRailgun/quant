@@ -45,6 +45,34 @@ def test_write_scoring_run_creates_metadata_scores_and_summary(tmp_path: Path):
     assert summary == {"winner_count": 1}
 
 
+def test_write_scoring_run_supports_deterministic_run_paths_for_regression_tests(tmp_path: Path):
+    scores = pd.DataFrame(
+        [
+            {"symbol": "AAA.T", "total_score": 1.23, "rank": 1},
+        ]
+    )
+
+    paths = write_scoring_run(
+        base_dir=tmp_path,
+        run_name="paper_signal",
+        metadata={"weight_mom": 1.0},
+        scores=scores,
+        summary={"winner_count": 1},
+        run_id="paper_signal-20260320T010203Z-deadbeef",
+        timestamp="20260320T010203Z",
+        created_at="20260320T010203Z",
+    )
+
+    assert paths["run_dir"] == tmp_path / "paper_signal" / "20260320T010203Z-20260320T010203Z-deadbeef"
+
+    registry_lines = (tmp_path / "registry.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(registry_lines) == 1
+    registry_entry = json.loads(registry_lines[0])
+    assert registry_entry["run_id"] == "paper_signal-20260320T010203Z-deadbeef"
+    assert registry_entry["created_at"] == "20260320T010203Z"
+    assert registry_entry["run_dir"] == str(paths["run_dir"])
+
+
 def test_build_scoring_metadata_derives_standard_payload_from_scores():
     scores = pd.DataFrame(
         [

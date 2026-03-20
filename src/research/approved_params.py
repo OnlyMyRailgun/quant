@@ -11,6 +11,23 @@ from src.research.artifacts import DEFAULT_REGISTRY_FILE
 DEFAULT_APPROVED_PARAMS_FILE = "paper_trade_params.json"
 
 
+def _validate_weights_table(weights: pd.DataFrame, weights_path: Path) -> None:
+    if weights.empty:
+        raise ValueError(f"{weights_path.name} is empty")
+
+    required_columns = {"rebalance_date", "weight_mom", "weight_vol", "weight_rev"}
+    missing_columns = sorted(required_columns - set(weights.columns))
+    if missing_columns:
+        missing = ", ".join(missing_columns)
+        raise ValueError(f"{weights_path.name} is missing required columns: {missing}")
+
+
+def _load_walk_forward_weights(weights_path: Path) -> pd.DataFrame:
+    weights = pd.read_csv(weights_path)
+    _validate_weights_table(weights, weights_path)
+    return weights
+
+
 def select_best_walk_forward_run(
     runs: list[dict],
     min_window_count: int = 1,
@@ -39,7 +56,8 @@ def approve_walk_forward_params(
     run_record: dict,
     rebalance_date: str,
 ) -> dict:
-    weights = pd.read_csv(run_record["weights"])
+    weights_path = Path(run_record["weights"])
+    weights = _load_walk_forward_weights(weights_path)
     selected = weights.loc[weights["rebalance_date"] == rebalance_date]
     if selected.empty:
         raise ValueError(f"No walk-forward weights found for rebalance_date={rebalance_date}")
@@ -72,31 +90,44 @@ def _load_registry_records(registry_path: Path) -> list[dict]:
     ]
 
 
+def load_walk_forward_run_candidates(artifact_dir: Path) -> list[dict]:
+    artifact_dir = Path(artifact_dir)
+    registry_records = _load_registry_records(artifact_dir / DEFAULT_REGISTRY_FILE.name)
+
+    candidates = []
+    for record in registry_records:
+        if record.get("run_name") != "walk_forward":
+            continue
+
+        summary_path = Path(record["summary"])
+        if not summary_path.exists():
+            continue
+
+        weights_path = Path(record["weights"])
+        weights = _load_walk_forward_weights(weights_path)
+
+        run = dict(record)
+        run["summary"] = json.loads(summary_path.read_text(encoding="utf-8"))
+        run["latest_rebalance_date"] = str(weights.iloc[-1]["rebalance_date"])
+        run["weights_path"] = str(weights_path)
+        candidates.append(run)
+
+    candidates.sort(key=lambda run: str(run.get("run_id", "")))
+    return candidates
+
+
 def approve_best_walk_forward_run(
     artifact_dir: Path,
     min_window_count: int = 1,
 ) -> dict:
     artifact_dir = Path(artifact_dir)
-    registry_records = _load_registry_records(artifact_dir / DEFAULT_REGISTRY_FILE.name)
-
-    walk_forward_runs = []
-    for record in registry_records:
-        if record.get("run_name") != "walk_forward":
-            continue
-        summary_path = Path(record["summary"])
-        if not summary_path.exists():
-            continue
-        run = dict(record)
-        run["summary"] = json.loads(summary_path.read_text(encoding="utf-8"))
-        walk_forward_runs.append(run)
+    walk_forward_runs = load_walk_forward_run_candidates(artifact_dir)
 
     best_run = select_best_walk_forward_run(walk_forward_runs, min_window_count=min_window_count)
-    weights = pd.read_csv(best_run["weights"])
-    latest_rebalance_date = str(weights.iloc[-1]["rebalance_date"])
     return approve_walk_forward_params(
         artifact_dir=artifact_dir,
         run_record=best_run,
-        rebalance_date=latest_rebalance_date,
+        rebalance_date=best_run["latest_rebalance_date"],
     )
 
 
@@ -104,7 +135,24 @@ def load_approved_paper_trading_params(artifact_dir: Path) -> dict | None:
     approved_path = Path(artifact_dir) / DEFAULT_APPROVED_PARAMS_FILE
     if not approved_path.exists():
         return None
-    return json.loads(approved_path.read_text(encoding="utf-8"))
+    try:
+        approved = json.loads(approved_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{approved_path.name} must contain valid JSON") from exc
+
+    if not isinstance(approved, dict):
+        raise ValueError(f"{approved_path.name} must contain a JSON object")
+
+    weights = approved.get("weights")
+    if not isinstance(weights, dict):
+        raise ValueError(f"{approved_path.name} must contain a 'weights' object")
+
+    missing_keys = [key for key in ("mom", "vol", "rev") if key not in weights]
+    if missing_keys:
+        missing = ", ".join(missing_keys)
+        raise ValueError(f"{approved_path.name} weights are missing required keys: {missing}")
+
+    return approved
 
 
 def resolve_approved_weight_values(

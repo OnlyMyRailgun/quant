@@ -6,6 +6,7 @@ import pandas as pd
 from src.research.approved_params import (
     approve_walk_forward_params,
     approve_best_walk_forward_run,
+    load_walk_forward_run_candidates,
     load_approved_paper_trading_params,
     resolve_approved_weight_values,
     select_best_walk_forward_run,
@@ -46,6 +47,63 @@ def test_select_best_walk_forward_run_chooses_highest_qualified_summary():
     best = select_best_walk_forward_run(runs, min_window_count=3)
 
     assert best["run_id"] == "wf-2"
+
+
+def test_load_walk_forward_run_candidates_returns_summary_latest_rebalance_date_and_weights_path(tmp_path: Path):
+    run_dir = tmp_path / "walk_forward" / "run-a"
+    run_dir.mkdir(parents=True)
+    weights_path = run_dir / "weights.csv"
+    summary_path = run_dir / "summary.json"
+
+    pd.DataFrame(
+        [
+            {
+                "rebalance_date": "2022-01-01",
+                "weight_mom": 1.0,
+                "weight_vol": 0.0,
+                "weight_rev": 0.0,
+            },
+            {
+                "rebalance_date": "2022-07-01",
+                "weight_mom": 0.5,
+                "weight_vol": 1.0,
+                "weight_rev": 0.5,
+            },
+        ]
+    ).to_csv(weights_path, index=False)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "window_count": 4,
+                "baseline_return_pct": 1.5,
+                "walk_forward_return_pct": 5.0,
+                "active_return_pct": 3.5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "registry.jsonl").write_text(
+        json.dumps(
+            {
+                "run_id": "wf-a",
+                "run_name": "walk_forward",
+                "run_dir": str(run_dir),
+                "weights": str(weights_path),
+                "summary": str(summary_path),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    candidates = load_walk_forward_run_candidates(tmp_path)
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["run_id"] == "wf-a"
+    assert candidate["summary"]["active_return_pct"] == 3.5
+    assert candidate["latest_rebalance_date"] == "2022-07-01"
+    assert candidate["weights_path"] == str(weights_path)
 
 
 def test_approve_walk_forward_params_writes_stable_paper_trading_file(tmp_path: Path):
@@ -172,3 +230,81 @@ def test_resolve_approved_weight_values_merges_explicit_overrides_with_approved_
     )
 
     assert resolved == {"mom": 1.0, "vol": 1.0, "rev": 0.5}
+
+
+def test_load_approved_paper_trading_params_raises_clear_error_for_invalid_json(tmp_path: Path):
+    approved_path = tmp_path / "paper_trade_params.json"
+    approved_path.write_text("{bad json", encoding="utf-8")
+
+    try:
+        load_approved_paper_trading_params(tmp_path)
+    except ValueError as exc:
+        assert "paper_trade_params.json" in str(exc)
+        assert "valid JSON" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid approved params JSON")
+
+
+def test_load_approved_paper_trading_params_raises_clear_error_when_weights_are_missing(tmp_path: Path):
+    approved_path = tmp_path / "paper_trade_params.json"
+    approved_path.write_text(json.dumps({"source_run_id": "wf-b"}), encoding="utf-8")
+
+    try:
+        load_approved_paper_trading_params(tmp_path)
+    except ValueError as exc:
+        assert "weights" in str(exc)
+        assert "paper_trade_params.json" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError when approved params weights are missing")
+
+
+def test_approve_walk_forward_params_raises_clear_error_when_weights_file_is_empty(tmp_path: Path):
+    run_dir = tmp_path / "walk_forward" / "run-a"
+    run_dir.mkdir(parents=True)
+    weights_path = run_dir / "weights.csv"
+    weights_path.write_text("rebalance_date,weight_mom,weight_vol,weight_rev\n", encoding="utf-8")
+
+    try:
+        approve_walk_forward_params(
+            artifact_dir=tmp_path,
+            run_record={
+                "run_id": "wf-a",
+                "weights": str(weights_path),
+            },
+            rebalance_date="2022-07-01",
+        )
+    except ValueError as exc:
+        assert "weights.csv" in str(exc)
+        assert "empty" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for empty weights.csv")
+
+
+def test_approve_walk_forward_params_raises_clear_error_when_required_columns_are_missing(tmp_path: Path):
+    run_dir = tmp_path / "walk_forward" / "run-a"
+    run_dir.mkdir(parents=True)
+    weights_path = run_dir / "weights.csv"
+    pd.DataFrame(
+        [
+            {
+                "rebalance_date": "2022-07-01",
+                "weight_mom": 0.5,
+                "weight_vol": 1.0,
+            }
+        ]
+    ).to_csv(weights_path, index=False)
+
+    try:
+        approve_walk_forward_params(
+            artifact_dir=tmp_path,
+            run_record={
+                "run_id": "wf-a",
+                "weights": str(weights_path),
+            },
+            rebalance_date="2022-07-01",
+        )
+    except ValueError as exc:
+        assert "weight_rev" in str(exc)
+        assert "weights.csv" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for missing weight columns")

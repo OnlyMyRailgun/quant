@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import sys
 from itertools import product
 from pathlib import Path
@@ -18,6 +19,11 @@ from src.strategies.multi_factor import UniversalMultiFactor
 STARTING_CASH = 1_000_000.0
 DEFAULT_BASELINE_WEIGHTS = (1.0, 1.0, 1.0)
 DEFAULT_WEIGHT_GRID = list(product((0.0, 0.5, 1.0), repeat=3))
+DEFAULT_OPTIMIZE_START = "2021-01-01"
+DEFAULT_OPTIMIZE_END = "2024-01-01"
+DEFAULT_TRAIN_MONTHS = 12
+DEFAULT_VALIDATION_MONTHS = 6
+DEFAULT_STEP_MONTHS = 6
 
 
 def suppress_output(strategy_class):
@@ -119,6 +125,18 @@ def run_walk_forward_optimization(
             window["validation_end"],
             DEFAULT_BASELINE_WEIGHTS,
         ),
+        evaluate_one_shot_training_window=lambda weights: evaluate_weight_tuple(
+            data_dfs,
+            start,
+            end,
+            weights,
+        ),
+        evaluate_one_shot_validation_window=lambda window, weights: evaluate_weight_tuple(
+            data_dfs,
+            window["validation_start"],
+            window["validation_end"],
+            weights,
+        ),
         artifact_dir=Path(artifact_dir) if artifact_dir is not None else None,
     )
 
@@ -132,6 +150,8 @@ def run_walk_forward_optimization(
     print()
     print(f"Windows evaluated               : {summary['window_count']}")
     print(f"Static baseline return total % : {summary['baseline_return_pct']:.4f}")
+    if "one_shot_return_pct" in summary:
+        print(f"One-shot optimized return total % : {summary['one_shot_return_pct']:.4f}")
     print(f"Walk-forward return total %    : {summary['walk_forward_return_pct']:.4f}")
     if "artifacts" in result:
         print(f"Artifacts written to           : {result['artifacts']['run_dir']}")
@@ -139,23 +159,52 @@ def run_walk_forward_optimization(
     return result
 
 
-if __name__ == "__main__":
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run walk-forward optimization research")
+    parser.add_argument("--start", default=DEFAULT_OPTIMIZE_START, help="Research start date (YYYY-MM-DD)")
+    parser.add_argument("--end", default=DEFAULT_OPTIMIZE_END, help="Research end date (YYYY-MM-DD)")
+    parser.add_argument("--train-months", type=int, default=DEFAULT_TRAIN_MONTHS, help="Training window length in months")
+    parser.add_argument(
+        "--validation-months",
+        type=int,
+        default=DEFAULT_VALIDATION_MONTHS,
+        help="Validation window length in months",
+    )
+    parser.add_argument("--step-months", type=int, default=DEFAULT_STEP_MONTHS, help="Walk-forward step size in months")
+    parser.add_argument("--artifact-dir", type=Path, default=DEFAULT_ARTIFACT_DIR, help="Artifact output directory")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv if argv is not None else [])
     symbols = get_topix_top_10()
-    print("Fetching historical data for walk-forward optimization...")
+    print(
+        "Fetching historical data for walk-forward optimization "
+        f"({args.start} -> {args.end})..."
+    )
 
     try:
-        data_dfs = fetch_universe(symbols, "2021-01-01", "2024-01-01")
+        data_dfs = fetch_universe(symbols, args.start, args.end)
     except Exception as exc:
         print(f"Data fetch failed: {exc}")
-        sys.exit(1)
+        return 1
 
-    run_walk_forward_optimization(
-        data_dfs=data_dfs,
-        start="2021-01-01",
-        end="2024-01-01",
-        train_months=12,
-        # The current strategy uses a 90-day momentum lookback, so the CLI
-        # defaults to a longer validation window that can warm up indicators.
-        validation_months=6,
-        step_months=6,
-    )
+    try:
+        run_walk_forward_optimization(
+            data_dfs=data_dfs,
+            start=args.start,
+            end=args.end,
+            train_months=args.train_months,
+            validation_months=args.validation_months,
+            step_months=args.step_months,
+            artifact_dir=args.artifact_dir,
+        )
+    except Exception as exc:
+        print(f"Walk-forward optimization failed: {exc}")
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

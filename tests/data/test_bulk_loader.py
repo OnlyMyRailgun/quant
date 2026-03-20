@@ -30,3 +30,74 @@ def test_fetch_universe(mock_fetch):
     # Cleanup
     if cache_path.exists():
         cache_path.unlink()
+
+
+@patch('src.data.bulk_loader.fetch_daily_data')
+def test_fetch_universe_refreshes_cache_when_left_side_of_requested_range_is_missing(mock_fetch):
+    symbol = "TEST_LEFT.T"
+    cache_path = CACHE_DIR / f"{symbol}.parquet"
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    cached_df = pd.DataFrame(
+        {"Close": [110, 111]},
+        index=pd.to_datetime(["2023-01-03", "2023-01-04"]),
+    )
+    cached_df.to_parquet(cache_path)
+
+    fetched_df = pd.DataFrame(
+        {"Close": [100, 101]},
+        index=pd.to_datetime(["2023-01-01", "2023-01-02"]),
+    )
+    mock_fetch.return_value = fetched_df
+
+    dfs = fetch_universe([symbol], "2023-01-01", "2023-01-04")
+
+    assert symbol in dfs
+    assert dfs[symbol].index.min() == pd.Timestamp("2023-01-01")
+    assert dfs[symbol].index.max() == pd.Timestamp("2023-01-04")
+    assert len(dfs[symbol]) == 4
+    assert mock_fetch.call_count == 1
+    assert mock_fetch.call_args[0] == (symbol, "2023-01-01", "2023-01-04")
+
+    merged = pd.read_parquet(cache_path)
+    assert merged.index.min() == pd.Timestamp("2023-01-01")
+    assert merged.index.max() == pd.Timestamp("2023-01-04")
+    assert len(merged) == 4
+
+    if cache_path.exists():
+        cache_path.unlink()
+
+
+@patch('src.data.bulk_loader.fetch_daily_data')
+def test_fetch_universe_refreshes_cache_when_right_side_of_requested_range_is_missing(mock_fetch):
+    symbol = "TEST_RIGHT.T"
+    cache_path = CACHE_DIR / f"{symbol}.parquet"
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    cached_df = pd.DataFrame(
+        {"Close": [100, 101]},
+        index=pd.to_datetime(["2023-01-01", "2023-01-02"]),
+    )
+    cached_df.to_parquet(cache_path)
+
+    fetched_df = pd.DataFrame(
+        {"Close": [110, 111]},
+        index=pd.to_datetime(["2023-01-03", "2023-01-04"]),
+    )
+    mock_fetch.return_value = fetched_df
+
+    dfs = fetch_universe([symbol], "2023-01-01", "2023-01-04")
+
+    assert symbol in dfs
+    assert dfs[symbol].index.min() == pd.Timestamp("2023-01-01")
+    assert dfs[symbol].index.max() == pd.Timestamp("2023-01-04")
+    assert len(dfs[symbol]) == 4
+    assert mock_fetch.call_count == 1
+
+    merged = pd.read_parquet(cache_path)
+    assert merged.index.min() == pd.Timestamp("2023-01-01")
+    assert merged.index.max() == pd.Timestamp("2023-01-04")
+    assert len(merged) == 4
+
+    if cache_path.exists():
+        cache_path.unlink()

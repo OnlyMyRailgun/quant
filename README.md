@@ -90,7 +90,7 @@ Goal:
 
 ### Milestone 2: Walk-forward decision engine
 
-Status: in progress.
+Status: complete.
 
 Goal:
 
@@ -124,12 +124,9 @@ Completed so far:
 - [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py) now runs a rolling walk-forward workflow instead of only a one-shot IS/OOS script.
 - Rolling train and validation window construction lives in [`src/research/walk_forward.py`](/Users/y-yang/Developer/quant/src/research/walk_forward.py).
 - Walk-forward runs persist per-rebalance weights and summary artifacts under `.research_artifacts/`.
+- The walk-forward workflow now reports static default, one-shot optimized, and walk-forward return comparisons in the same run summary.
 - Regression coverage for walk-forward windowing, weight selection, artifact writing, and runner output lives in [`tests/research/test_walk_forward.py`](/Users/y-yang/Developer/quant/tests/research/test_walk_forward.py).
-
-Remaining for milestone completion:
-
-- Add stronger coverage or reporting around one-shot optimized weights versus walk-forward weights in the same workflow output.
-- Tighten determinism guarantees and artifact-loading ergonomics for downstream consumers.
+- Determinism-oriented regression coverage and artifact-loading ergonomics for downstream consumers are now covered by the research test suite.
 
 ### Milestone 3: Explainable stock selection
 
@@ -164,7 +161,7 @@ Acceptance criteria:
 
 ### Milestone 4: Paper trader alignment with research pipeline
 
-Status: in progress.
+Status: complete.
 
 Goal:
 
@@ -196,12 +193,9 @@ Completed so far:
 - Tests now cover ranking parity across the shared scorer, the Backtrader strategy adapter, and the paper-trading path under the same weights.
 - Walk-forward parameter artifacts can now be produced by [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py).
 - Approved paper-trading params can now be selected from qualified walk-forward runs and loaded by the paper trader by default.
+- An operator-facing approval CLI now lives in [`src/research/approve.py`](/Users/y-yang/Developer/quant/src/research/approve.py), including candidate listing and default approval of the latest rebalance date for a chosen run.
 - The multi-factor backtest path in [`src/main.py`](/Users/y-yang/Developer/quant/src/main.py) now uses the same approved params source by default unless explicit CLI weights are supplied.
-
-Remaining for milestone completion:
-
-- Add a more explicit operator-facing approval workflow if we want approvals managed outside Python helpers.
-- Extend the same default approved-parameter source to any other research entry points we still want to unify.
+- The walk-forward optimizer now supports explicit CLI time-window control in [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py), so research runs can be reproduced and approved against stable date ranges instead of hand-edited script values.
 
 ### Milestone 5: Turnover and risk controls
 
@@ -461,7 +455,7 @@ Scope:
 
 Status: next active phase.
 
-Current state: in progress.
+Current state: complete.
 
 Definition of done:
 
@@ -475,6 +469,7 @@ Suggested implementation tasks:
 2. Add rolling window orchestration on top of that reusable optimizer.
 3. Save validated weights to an artifact file.
 4. Add summary output comparing walk-forward and baseline performance.
+5. Extend the same summary so static default, one-shot optimized, and walk-forward results can be compared side by side.
 
 ### Phase 2: Remove research/live drift
 
@@ -482,7 +477,7 @@ Scope:
 
 - Build Milestone 4 immediately after Milestone 2.
 
-Status: partially de-risked by the shared scoring core, but blocked on Milestone 2 parameter artifacts.
+Status: complete.
 
 Definition of done:
 
@@ -545,23 +540,21 @@ Suggested implementation tasks:
 
 ## Recommended Immediate Next Task
 
-If we are starting implementation now, the best next task is:
+If we are starting implementation now, the best next task is Milestone 3 explainability output:
 
-1. Refactor the optimizer into reusable functions that can run on arbitrary date windows.
-2. Build a walk-forward runner on top of those functions.
-3. Save chosen weights by rebalance period.
+1. Persist per-stock factor inputs and weighted contributions for each rebalance.
+2. Show selected winners alongside near-miss candidates from the same ranking run.
+3. Make the output easy to inspect later from saved artifacts or a lightweight CLI view.
 
-That gives the project a stronger decision foundation before we invest in more live execution behavior.
+That turns aligned research and paper-trading decisions into decisions we can also explain and debug.
 
 ## Suggested Near-Term Order
 
 If we want the best sequence from here, the recommended order is:
 
-1. Build walk-forward optimization.
-2. Finish validated-parameter alignment between research and paper trading.
-3. Add explainability output for each rebalance.
-4. Add turnover controls.
-5. Deepen tests.
+1. Add explainability output for each rebalance.
+2. Add turnover controls.
+3. Deepen tests.
 
 That order improves decision quality first, then operational consistency, then safety and maintainability.
 
@@ -581,7 +574,27 @@ uv run python -m src.main --strategy multi --universe --no-plot
 uv run python -m src.optimize
 ```
 
-Walk-forward artifacts are written under `.research_artifacts/`. The newest run is not automatically treated as approved for paper trading. Instead, paper trading should use the approved params file at `.research_artifacts/paper_trade_params.json`, which points to a chosen validated parameter set.
+```bash
+uv run python -m src.optimize --start 2024-01-04 --end 2025-12-30 --train-months 12 --validation-months 6 --step-months 6
+```
+
+`src.optimize` now supports explicit CLI control over the research window and walk-forward settings. Its default research period is `2021-01-01` through `2024-01-01`, with a 12-month training window, 6-month validation window, and 6-month step size. It prints a summary that compares static default weights, one-shot optimized weights, and walk-forward weights. Walk-forward artifacts are written under `.research_artifacts/`. The newest run is not automatically treated as approved for paper trading. Instead, paper trading should use the approved params file at `.research_artifacts/paper_trade_params.json`, which points to a chosen validated parameter set.
+
+Operator approval flow:
+
+```bash
+uv run python -m src.research.approve list
+```
+
+```bash
+uv run python -m src.research.approve approve --run-id <id>
+```
+
+```bash
+uv run python -m src.research.approve approve --run-id <id> --rebalance-date YYYY-MM-DD
+```
+
+The strict offline verification path for Milestone 2 lives in the research tests, including walk-forward summary regression coverage, deterministic artifact checks, approved-parameter validation, and an offline optimizer smoke test.
 
 ```bash
 uv run python -m src.paper.bot status
@@ -597,5 +610,5 @@ uv run pytest -q
 - The current system is best understood as a research prototype with real momentum toward a more disciplined portfolio engine.
 - The strongest completed capability today is cross-sectional stock ranking and top-`N` portfolio selection.
 - The shared scoring core and experiment artifact foundation are now in place for paper-signal generation.
-- The highest-value next milestone is making those buy decisions walk-forward validated and consistent between backtest and paper trading.
+- The highest-value next milestone is Milestone 3: making each rebalance decision explainable.
 - Python dependencies are now managed through `uv` using [`pyproject.toml`](/Users/y-yang/Developer/quant/pyproject.toml) and `uv.lock`.

@@ -37,9 +37,14 @@ def write_scoring_run(
     metadata: dict,
     scores: pd.DataFrame,
     summary: dict,
+    run_id: str | None = None,
+    timestamp: str | None = None,
+    created_at: str | None = None,
 ) -> dict[str, Path]:
-    run_id = create_run_id(run_name)
-    run_dir = base_dir / run_name / f"{_timestamp()}-{run_id.split('-', 1)[-1]}"
+    run_id = run_id or create_run_id(run_name)
+    timestamp = timestamp or _timestamp()
+    created_at = created_at or _timestamp()
+    run_dir = base_dir / run_name / f"{timestamp}-{run_id.split('-', 1)[-1]}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
     metadata_path = run_dir / "metadata.json"
@@ -58,7 +63,7 @@ def write_scoring_run(
         "metadata": str(metadata_path),
         "scores": str(scores_path),
         "summary": str(summary_path),
-        "created_at": _timestamp(),
+        "created_at": created_at,
     }
     append_run_record(base_dir / "registry.jsonl", registry_entry)
 
