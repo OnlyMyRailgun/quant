@@ -17,6 +17,20 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def build_scoring_metadata(
+    scores: pd.DataFrame,
+    top_n: int,
+    weights: dict[str, float],
+    lookbacks: dict[str, int],
+) -> dict:
+    return {
+        "top_n": top_n,
+        "weights": dict(weights),
+        "lookbacks": dict(lookbacks),
+        "universe": scores["symbol"].tolist(),
+    }
+
+
 def write_scoring_run(
     base_dir: Path,
     run_name: str,
@@ -54,4 +68,3 @@ def write_scoring_run(
         "scores": scores_path,
         "summary": summary_path,
     }
-

@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.paper.bot import calculate_current_signals
-from src.research.artifacts import write_scoring_run
+from src.research.artifacts import build_scoring_metadata, write_scoring_run
 from src.research.registry import append_run_record, create_run_id
 
 
@@ -43,6 +43,29 @@ def test_write_scoring_run_creates_metadata_scores_and_summary(tmp_path: Path):
 
     summary = json.loads(paths["summary"].read_text())
     assert summary == {"winner_count": 1}
+
+
+def test_build_scoring_metadata_derives_standard_payload_from_scores():
+    scores = pd.DataFrame(
+        [
+            {"symbol": "AAA.T", "total_score": 1.23, "rank": 1},
+            {"symbol": "BBB.T", "total_score": 0.45, "rank": 2},
+        ]
+    )
+
+    metadata = build_scoring_metadata(
+        scores=scores,
+        top_n=2,
+        weights={"mom": 1.5, "vol": 0.5, "rev": 2.0},
+        lookbacks={"mom": 90, "vol": 20, "rev": 20},
+    )
+
+    assert metadata == {
+        "top_n": 2,
+        "weights": {"mom": 1.5, "vol": 0.5, "rev": 2.0},
+        "lookbacks": {"mom": 90, "vol": 20, "rev": 20},
+        "universe": ["AAA.T", "BBB.T"],
+    }
 
 
 def test_append_run_record_is_append_only_jsonl(tmp_path: Path):

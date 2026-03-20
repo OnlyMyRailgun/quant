@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime
 from tabulate import tabulate
 
-from src.research.artifacts import write_scoring_run
+from src.research.artifacts import build_scoring_metadata, write_scoring_run
 from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_MOM,
     DEFAULT_LOOKBACK_REV,
@@ -37,17 +37,7 @@ def _build_signal_run(
         lookback_vol=lookback_vol,
         lookback_rev=lookback_rev,
     )
-    metadata = {
-        "top_n": top_n,
-        "weights": {"mom": weight_mom, "vol": weight_vol, "rev": weight_rev},
-        "lookbacks": {
-            "mom": lookback_mom,
-            "vol": lookback_vol,
-            "rev": lookback_rev,
-        },
-        "universe": ranked["symbol"].tolist(),
-    }
-    return ranked, metadata
+    return ranked
 
 
 def _with_legacy_factor_aliases(ranked: pd.DataFrame) -> pd.DataFrame:
@@ -75,7 +65,7 @@ def calculate_current_signals(
     This delegates to the same ranking logic used by the research layer so
     paper-trading recommendations stay aligned with backtests.
     """
-    ranked, metadata = _build_signal_run(
+    ranked = _build_signal_run(
         data_dfs,
         top_n=top_n,
         weight_mom=weight_mom,
@@ -88,6 +78,16 @@ def calculate_current_signals(
 
     if artifact_dir is not None:
         winners = ranked.head(top_n)
+        metadata = build_scoring_metadata(
+            scores=ranked,
+            top_n=top_n,
+            weights={"mom": weight_mom, "vol": weight_vol, "rev": weight_rev},
+            lookbacks={
+                "mom": lookback_mom,
+                "vol": lookback_vol,
+                "rev": lookback_rev,
+            },
+        )
         write_scoring_run(
             base_dir=Path(artifact_dir),
             run_name="paper_signal",
