@@ -6,6 +6,7 @@ import pandas as pd
 
 import src.optimize as optimize
 from src.research.walk_forward import (
+    aggregate_universe_participation_summary,
     build_walk_forward_windows,
     run_walk_forward_experiment,
     select_best_weights,
@@ -316,6 +317,189 @@ def test_run_walk_forward_experiment_aggregates_summary_contributors_from_full_s
     ]
 
 
+def test_run_walk_forward_experiment_aggregates_universe_participation_summary():
+    weight_grid = [(1.0, 0.0, 0.0)]
+    validation_scores = {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+            "return_pct": 1.0,
+            "sharpe": 0.1,
+            "requested_symbol_count": 10,
+            "loaded_symbol_count": 8,
+            "skipped_symbol_count": 2,
+            "coverage_ratio": 0.8,
+        },
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+            "return_pct": 2.0,
+            "sharpe": 0.2,
+            "requested_symbol_count": 10,
+            "loaded_symbol_count": 6,
+            "skipped_symbol_count": 4,
+            "coverage_ratio": 0.6,
+        },
+    }
+
+    result = run_walk_forward_experiment(
+        start="2021-01-01",
+        end="2021-12-31",
+        train_months=6,
+        validation_months=3,
+        step_months=3,
+        weight_grid=weight_grid,
+        evaluate_training_window=lambda window, weights: {"return_pct": 1.0, "sharpe": 0.1},
+        evaluate_validation_window=lambda window, weights: validation_scores[
+            (window["validation_start"], window["validation_end"], weights)
+        ],
+        evaluate_baseline_window=lambda window: {"return_pct": 0.5, "sharpe": 0.05},
+    )
+
+    assert result["summary"]["window_count"] == 2
+    assert result["summary"]["avg_loaded_symbol_count"] == 7.0
+    assert result["summary"]["avg_skipped_symbol_count"] == 3.0
+    assert result["summary"]["avg_coverage_ratio"] == 0.7
+    assert result["summary"]["min_loaded_symbol_count"] == 6
+    assert result["summary"]["min_coverage_ratio"] == 0.6
+
+
+def test_run_walk_forward_experiment_threads_universe_participation_fields_into_rows():
+    weight_grid = [(1.0, 0.0, 0.0)]
+    validation_scores = {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+            "return_pct": 1.0,
+            "sharpe": 0.1,
+            "requested_symbol_count": 10,
+            "loaded_symbol_count": 8,
+            "skipped_symbol_count": 2,
+            "coverage_ratio": 0.8,
+        },
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+            "return_pct": 2.0,
+            "sharpe": 0.2,
+            "requested_symbol_count": 10,
+            "loaded_symbol_count": 6,
+            "skipped_symbol_count": 4,
+            "coverage_ratio": 0.6,
+        },
+    }
+
+    result = run_walk_forward_experiment(
+        start="2021-01-01",
+        end="2021-12-31",
+        train_months=6,
+        validation_months=3,
+        step_months=3,
+        weight_grid=weight_grid,
+        evaluate_training_window=lambda window, weights: {"return_pct": 1.0, "sharpe": 0.1},
+        evaluate_validation_window=lambda window, weights: validation_scores[
+            (window["validation_start"], window["validation_end"], weights)
+        ],
+        evaluate_baseline_window=lambda window: {"return_pct": 0.5, "sharpe": 0.05},
+    )
+
+    assert result["weights"]["requested_symbol_count"].tolist() == [10, 10]
+    assert result["weights"]["loaded_symbol_count"].tolist() == [8, 6]
+    assert result["weights"]["skipped_symbol_count"].tolist() == [2, 4]
+    assert result["weights"]["coverage_ratio"].tolist() == [0.8, 0.6]
+
+
+def test_run_walk_forward_experiment_omits_universe_participation_summary_when_not_provided():
+    weight_grid = [(1.0, 0.0, 0.0)]
+    validation_scores = {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+            "return_pct": 1.0,
+            "sharpe": 0.1,
+        },
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+            "return_pct": 2.0,
+            "sharpe": 0.2,
+        },
+    }
+
+    result = run_walk_forward_experiment(
+        start="2021-01-01",
+        end="2021-12-31",
+        train_months=6,
+        validation_months=3,
+        step_months=3,
+        weight_grid=weight_grid,
+        evaluate_training_window=lambda window, weights: {"return_pct": 1.0, "sharpe": 0.1},
+        evaluate_validation_window=lambda window, weights: validation_scores[
+            (window["validation_start"], window["validation_end"], weights)
+        ],
+        evaluate_baseline_window=lambda window: {"return_pct": 0.5, "sharpe": 0.05},
+    )
+
+    for key in [
+        "avg_loaded_symbol_count",
+        "avg_skipped_symbol_count",
+        "avg_coverage_ratio",
+        "min_loaded_symbol_count",
+        "min_coverage_ratio",
+    ]:
+        assert key not in result["summary"]
+
+
+def test_run_walk_forward_experiment_omits_universe_participation_row_columns_when_not_provided():
+    weight_grid = [(1.0, 0.0, 0.0)]
+    validation_scores = {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+            "return_pct": 1.0,
+            "sharpe": 0.1,
+        },
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+            "return_pct": 2.0,
+            "sharpe": 0.2,
+        },
+    }
+
+    result = run_walk_forward_experiment(
+        start="2021-01-01",
+        end="2021-12-31",
+        train_months=6,
+        validation_months=3,
+        step_months=3,
+        weight_grid=weight_grid,
+        evaluate_training_window=lambda window, weights: {"return_pct": 1.0, "sharpe": 0.1},
+        evaluate_validation_window=lambda window, weights: validation_scores[
+            (window["validation_start"], window["validation_end"], weights)
+        ],
+        evaluate_baseline_window=lambda window: {"return_pct": 0.5, "sharpe": 0.05},
+    )
+
+    for key in [
+        "requested_symbol_count",
+        "loaded_symbol_count",
+        "skipped_symbol_count",
+        "coverage_ratio",
+    ]:
+        assert key not in result["weights"].columns
+
+
+def test_aggregate_universe_participation_summary_accepts_partial_window_metrics():
+    summary = aggregate_universe_participation_summary(
+        [
+            {
+                "loaded_symbol_count": 8,
+                "skipped_symbol_count": 2,
+                "coverage_ratio": 0.8,
+            },
+            {
+                "requested_symbol_count": 10,
+                "loaded_symbol_count": 6,
+                "skipped_symbol_count": 4,
+                "coverage_ratio": 0.6,
+            },
+        ]
+    )
+
+    assert summary == {
+        "avg_loaded_symbol_count": 7.0,
+        "avg_skipped_symbol_count": 3.0,
+        "avg_coverage_ratio": 0.7,
+        "min_loaded_symbol_count": 6,
+        "min_coverage_ratio": 0.6,
+    }
+
+
 def test_run_walk_forward_optimization_prints_one_shot_comparison(monkeypatch, capsys):
     captured = {}
 
@@ -344,6 +528,11 @@ def test_run_walk_forward_optimization_prints_one_shot_comparison(monkeypatch, c
                 "walk_forward_excess_vs_topx_pct": 0.9,
                 "walk_forward_excess_vs_n225_pct": 0.7,
                 "avg_hit_rate": 0.5,
+                "avg_loaded_symbol_count": 28.0,
+                "avg_skipped_symbol_count": 22.0,
+                "avg_coverage_ratio": 0.56,
+                "min_loaded_symbol_count": 24,
+                "min_coverage_ratio": 0.48,
                 "top_contributors": [{"symbol": "AAA.T", "return_pct": 1.2}],
                 "bottom_contributors": [{"symbol": "BBB.T", "return_pct": -0.4}],
             },
@@ -368,6 +557,102 @@ def test_run_walk_forward_optimization_prints_one_shot_comparison(monkeypatch, c
     assert "N225 benchmark return total %" in output
     assert "Average window hit rate" in output
     assert "Top contributors" in output
+    assert "Average loaded symbols" in output
+    assert "Average skipped symbols" in output
+    assert "Average coverage ratio" in output
+    assert "Minimum coverage ratio" in output
+    assert "28.0000" in output
+    assert "0.4800" in output
+
+
+def test_run_walk_forward_optimization_skips_universe_participation_section_when_absent(
+    monkeypatch,
+    capsys,
+):
+    def fake_run_walk_forward_experiment(**kwargs):
+        del kwargs
+        return {
+            "weights": pd.DataFrame(
+                [
+                    {
+                        "rebalance_date": "2021-07-01",
+                        "weight_mom": 1.0,
+                        "weight_vol": 0.5,
+                        "weight_rev": 0.0,
+                    }
+                ]
+            ),
+            "summary": {
+                "window_count": 1,
+                "baseline_return_pct": 1.0,
+                "walk_forward_return_pct": 1.8,
+                "avg_hit_rate": 0.5,
+                "top_contributors": [{"symbol": "AAA.T", "return_pct": 1.2}],
+                "bottom_contributors": [{"symbol": "BBB.T", "return_pct": -0.4}],
+            },
+        }
+
+    monkeypatch.setattr(optimize, "run_walk_forward_experiment", fake_run_walk_forward_experiment)
+
+    optimize.run_walk_forward_optimization(
+        data_dfs={},
+        start="2021-01-01",
+        end="2021-12-31",
+        artifact_dir=None,
+    )
+
+    output = capsys.readouterr().out
+    assert "Average loaded symbols" not in output
+    assert "Average skipped symbols" not in output
+    assert "Average coverage ratio" not in output
+    assert "Minimum coverage ratio" not in output
+
+
+def test_run_walk_forward_optimization_computes_partial_universe_coverage(monkeypatch):
+    captured = {}
+
+    def fake_run_walk_forward_experiment(**kwargs):
+        captured["validation_metrics"] = kwargs["evaluate_validation_window"](
+            {
+                "validation_start": "2021-07-01",
+                "validation_end": "2021-09-30",
+            },
+            (1.0, 0.0, 0.0),
+        )
+        return {
+            "weights": pd.DataFrame(),
+            "summary": {
+                "window_count": 1,
+                "baseline_return_pct": 0.0,
+                "walk_forward_return_pct": 0.0,
+            },
+        }
+
+    monkeypatch.setattr(optimize, "run_walk_forward_experiment", fake_run_walk_forward_experiment)
+    monkeypatch.setattr(
+        optimize,
+        "evaluate_weight_tuple",
+        lambda data_dfs, start, end, weights: {"return_pct": 1.0, "sharpe": 0.1},
+    )
+
+    data_dfs = {
+        "AAA.T": pd.DataFrame({"Close": [100.0, 101.0]}, index=pd.to_datetime(["2021-07-01", "2021-09-30"])),
+        "BBB.T": pd.DataFrame({"Close": [99.0, 98.0]}, index=pd.to_datetime(["2021-05-01", "2021-05-31"])),
+    }
+
+    optimize.run_walk_forward_optimization(
+        data_dfs=data_dfs,
+        start="2021-01-01",
+        end="2021-12-31",
+        artifact_dir=None,
+        universe_name="japan_large_30",
+        universe_symbols=["AAA.T", "BBB.T", "CCC.T"],
+    )
+
+    assert captured["validation_metrics"]["requested_symbol_count"] == 3
+    assert captured["validation_metrics"]["loaded_symbol_count"] == 1
+    assert captured["validation_metrics"]["skipped_symbol_count"] == 2
+    assert captured["validation_metrics"]["coverage_ratio"] == 0.3333
 
 
 def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator(
@@ -416,6 +701,11 @@ def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator
         "one_shot_active_return_pct": 0.4,
         "active_return_pct": 0.8,
         "avg_hit_rate": None,
+        "avg_loaded_symbol_count": 0.0,
+        "avg_skipped_symbol_count": 1.0,
+        "avg_coverage_ratio": 0.0,
+        "min_loaded_symbol_count": 0,
+        "min_coverage_ratio": 0.0,
         "top_contributors": [],
         "bottom_contributors": [],
     }
@@ -433,6 +723,38 @@ def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator
     assert metadata["universe_symbols"] == ["AAA.T"]
     assert summary == result["summary"]
     assert saved_weights["rebalance_date"].tolist() == ["2021-07-01"]
+
+
+def test_run_walk_forward_optimization_omits_universe_participation_without_universe_symbols(monkeypatch):
+    def fake_run_walk_forward_experiment(**kwargs):
+        return {
+            "weights": pd.DataFrame(),
+            "summary": {
+                "window_count": 1,
+                "baseline_return_pct": 1.0,
+                "walk_forward_return_pct": 1.8,
+            },
+        }
+
+    monkeypatch.setattr(optimize, "run_walk_forward_experiment", fake_run_walk_forward_experiment)
+
+    result = optimize.run_walk_forward_optimization(
+        data_dfs={"AAA.T": pd.DataFrame()},
+        start="2021-01-01",
+        end="2021-12-31",
+        artifact_dir=None,
+        universe_name=None,
+        universe_symbols=None,
+    )
+
+    for key in (
+        "avg_loaded_symbol_count",
+        "avg_skipped_symbol_count",
+        "avg_coverage_ratio",
+        "min_loaded_symbol_count",
+        "min_coverage_ratio",
+    ):
+        assert key not in result["summary"]
 
 
 def test_optimize_main_prints_friendly_error_when_walk_forward_run_fails(monkeypatch, capsys):

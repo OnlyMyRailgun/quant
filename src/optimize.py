@@ -94,6 +94,41 @@ def _slice_window_data(
     return window_dfs
 
 
+def _build_validation_participation_metrics(
+    data_dfs: dict[str, pd.DataFrame],
+    universe_symbols: list[str] | None,
+    validation_start: str,
+    validation_end: str,
+) -> dict[str, float | int]:
+    if universe_symbols is None:
+        return {}
+
+    loaded_symbol_count = 0
+    for symbol in universe_symbols:
+        df = data_dfs.get(symbol)
+        if df is None:
+            continue
+        try:
+            window_df = df.loc[validation_start:validation_end]
+        except KeyError:
+            continue
+        if not window_df.empty:
+            loaded_symbol_count += 1
+
+    requested_symbol_count = len(universe_symbols)
+    skipped_symbol_count = requested_symbol_count - loaded_symbol_count
+    coverage_ratio = 0.0
+    if requested_symbol_count > 0:
+        coverage_ratio = round(loaded_symbol_count / requested_symbol_count, 4)
+
+    return {
+        "requested_symbol_count": requested_symbol_count,
+        "loaded_symbol_count": loaded_symbol_count,
+        "skipped_symbol_count": skipped_symbol_count,
+        "coverage_ratio": coverage_ratio,
+    }
+
+
 def evaluate_weight_tuple(
     data_dfs: dict[str, pd.DataFrame],
     start: str,
@@ -208,6 +243,12 @@ def run_walk_forward_optimization(
             window["validation_start"],
             window["validation_end"],
             weights,
+        )
+        | _build_validation_participation_metrics(
+            data_dfs=data_dfs,
+            universe_symbols=universe_symbols,
+            validation_start=window["validation_start"],
+            validation_end=window["validation_end"],
         ),
         evaluate_baseline_window=lambda window: evaluate_weight_tuple(
             data_dfs,
@@ -266,6 +307,14 @@ def run_walk_forward_optimization(
     print(f"Walk-forward return total %    : {summary['walk_forward_return_pct']:.4f}")
     if "avg_hit_rate" in summary and summary["avg_hit_rate"] is not None:
         print(f"Average window hit rate        : {summary['avg_hit_rate']:.4f}")
+    if "avg_loaded_symbol_count" in summary:
+        print(f"Average loaded symbols         : {summary['avg_loaded_symbol_count']:.4f}")
+    if "avg_skipped_symbol_count" in summary:
+        print(f"Average skipped symbols        : {summary['avg_skipped_symbol_count']:.4f}")
+    if "avg_coverage_ratio" in summary:
+        print(f"Average coverage ratio         : {summary['avg_coverage_ratio']:.4f}")
+    if "min_coverage_ratio" in summary:
+        print(f"Minimum coverage ratio         : {summary['min_coverage_ratio']:.4f}")
     if "top_contributors" in summary:
         print(f"Top contributors              : {_format_contributor_summary(summary['top_contributors'])}")
     if "bottom_contributors" in summary:

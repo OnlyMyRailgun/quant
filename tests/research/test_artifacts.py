@@ -141,6 +141,11 @@ def test_write_walk_forward_run_persists_diagnostics_in_summary(tmp_path: Path):
             "baseline_return_pct": 1.0,
             "walk_forward_return_pct": 1.8,
             "avg_hit_rate": 0.5,
+            "avg_loaded_symbol_count": 8.0,
+            "avg_skipped_symbol_count": 2.0,
+            "avg_coverage_ratio": 0.8,
+            "min_loaded_symbol_count": 8,
+            "min_coverage_ratio": 0.8,
             "top_contributors": [{"symbol": "AAA.T", "return_pct": 2.0}],
             "bottom_contributors": [{"symbol": "BBB.T", "return_pct": -0.5}],
         },
@@ -150,6 +155,11 @@ def test_write_walk_forward_run_persists_diagnostics_in_summary(tmp_path: Path):
     saved_weights = pd.read_csv(paths["weights"])
 
     assert summary["avg_hit_rate"] == 0.5
+    assert summary["avg_loaded_symbol_count"] == 8.0
+    assert summary["avg_skipped_symbol_count"] == 2.0
+    assert summary["avg_coverage_ratio"] == 0.8
+    assert summary["min_loaded_symbol_count"] == 8
+    assert summary["min_coverage_ratio"] == 0.8
     assert summary["top_contributors"] == [{"symbol": "AAA.T", "return_pct": 2.0}]
     assert summary["bottom_contributors"] == [{"symbol": "BBB.T", "return_pct": -0.5}]
     assert "hit_rate" in saved_weights.columns

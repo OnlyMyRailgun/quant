@@ -6,6 +6,17 @@ from src.research.artifacts import write_walk_forward_run
 
 
 DEFAULT_CONTRIBUTOR_COUNT = 3
+PARTICIPATION_ROW_FIELDS = (
+    "requested_symbol_count",
+    "loaded_symbol_count",
+    "skipped_symbol_count",
+    "coverage_ratio",
+)
+PARTICIPATION_SUMMARY_FIELDS = (
+    "loaded_symbol_count",
+    "skipped_symbol_count",
+    "coverage_ratio",
+)
 
 
 def _format_date(value: pd.Timestamp) -> str:
@@ -138,6 +149,38 @@ def aggregate_symbol_return_contributors(
     }
 
 
+def aggregate_universe_participation_summary(
+    window_metrics: list[dict[str, object]],
+) -> dict[str, object]:
+    participation_rows = []
+
+    for metrics in window_metrics:
+        if not all(field in metrics for field in PARTICIPATION_SUMMARY_FIELDS):
+            continue
+        participation_rows.append(
+            {
+                "loaded_symbol_count": int(metrics["loaded_symbol_count"]),
+                "skipped_symbol_count": int(metrics["skipped_symbol_count"]),
+                "coverage_ratio": float(metrics["coverage_ratio"]),
+            }
+        )
+
+    if not participation_rows:
+        return {}
+
+    loaded_symbol_counts = [row["loaded_symbol_count"] for row in participation_rows]
+    skipped_symbol_counts = [row["skipped_symbol_count"] for row in participation_rows]
+    coverage_ratios = [row["coverage_ratio"] for row in participation_rows]
+
+    return {
+        "avg_loaded_symbol_count": round(sum(loaded_symbol_counts) / len(loaded_symbol_counts), 10),
+        "avg_skipped_symbol_count": round(sum(skipped_symbol_counts) / len(skipped_symbol_counts), 10),
+        "avg_coverage_ratio": round(sum(coverage_ratios) / len(coverage_ratios), 10),
+        "min_loaded_symbol_count": min(loaded_symbol_counts),
+        "min_coverage_ratio": min(coverage_ratios),
+    }
+
+
 def build_walk_forward_windows(
     start: str,
     end: str,
@@ -246,6 +289,7 @@ def run_walk_forward_experiment(
     benchmark_evaluators = evaluate_benchmark_windows or {}
     window_diagnostics: list[dict[str, object]] = []
     window_symbol_returns: list[object] = []
+    window_participation_metrics: list[dict[str, object]] = []
 
     if evaluate_one_shot_training_window is not None:
         one_shot_leaderboard = select_best_weights(
@@ -299,6 +343,7 @@ def run_walk_forward_experiment(
         diagnostics = build_portfolio_diagnostics(symbol_returns)
         window_diagnostics.append(diagnostics)
         window_symbol_returns.append(symbol_returns)
+        window_participation_metrics.append(validation_metrics)
 
         baseline_total += float(baseline_metrics["return_pct"])
         walk_forward_total += float(validation_metrics["return_pct"])
@@ -321,6 +366,11 @@ def run_walk_forward_experiment(
                 "top_contributors": diagnostics["top_contributors"],
                 "bottom_contributors": diagnostics["bottom_contributors"],
                 **{
+                    field: validation_metrics[field]
+                    for field in PARTICIPATION_ROW_FIELDS
+                    if field in validation_metrics
+                },
+                **{
                     f"{benchmark_name}_return_pct": benchmark_return_pct
                     for benchmark_name, benchmark_return_pct in benchmark_returns.items()
                 },
@@ -330,6 +380,7 @@ def run_walk_forward_experiment(
     weights = pd.DataFrame(rows)
     summary_diagnostics = aggregate_portfolio_diagnostics(window_diagnostics)
     summary_contributors = aggregate_symbol_return_contributors(window_symbol_returns)
+    summary_participation = aggregate_universe_participation_summary(window_participation_metrics)
     summary = {
         "window_count": len(rows),
         "baseline_return_pct": round(baseline_total, 10),
@@ -339,6 +390,7 @@ def run_walk_forward_experiment(
         "top_contributors": summary_contributors["top_contributors"],
         "bottom_contributors": summary_contributors["bottom_contributors"],
     }
+    summary.update(summary_participation)
     if one_shot_best_weights is not None:
         summary["one_shot_return_pct"] = round(one_shot_total, 10)
         summary["one_shot_active_return_pct"] = round(one_shot_total - baseline_total, 10)
