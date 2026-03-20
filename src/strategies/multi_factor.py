@@ -1,6 +1,9 @@
 import math
 import statistics
 import backtrader as bt
+import pandas as pd
+
+from src.scoring.multi_factor import score_universe
 
 class UniversalMultiFactor(bt.Strategy):
     """
@@ -60,52 +63,50 @@ class UniversalMultiFactor(bt.Strategy):
         multiplier = -1.0 if invert else 1.0
         return [multiplier * (v - mean_val) / std_val for v in values]
 
-    def rebalance(self):
-        valid_stocks = []
-        raw_mom = []
-        raw_vol = []
-        raw_rev = []
-        
-        # 1. Identify valid universe components for this date
-        for d in self.datas:
-            mom_v = self.inds[d]['mom'][0]
-            vol_v = self.inds[d]['vol'][0]
-            rev_v = self.inds[d]['rev'][0]
-            
-            # Must have all factor metrics available (no NaNs)
-            if not (math.isnan(mom_v) or math.isnan(vol_v) or math.isnan(rev_v)):
-                valid_stocks.append(d)
-                raw_mom.append(mom_v)
-                raw_vol.append(vol_v)
-                raw_rev.append(rev_v)
+    def _collect_visible_history(self) -> dict[str, pd.DataFrame]:
+        history = {}
+        for data in self.datas:
+            closes = list(data.close.get(size=len(data)))
+            datetimes = [
+                bt.num2date(value).replace(tzinfo=None)
+                for value in data.datetime.get(size=len(data))
+            ]
+            if not closes or not datetimes:
+                continue
 
-        if not valid_stocks:
+            history[data._name] = pd.DataFrame(
+                {"Close": closes},
+                index=pd.DatetimeIndex(datetimes),
+            )
+
+        return history
+
+    def _score_visible_universe(self) -> pd.DataFrame:
+        return score_universe(
+            self._collect_visible_history(),
+            top_n=self.p.top_n,
+            weight_mom=self.p.weight_mom,
+            weight_vol=self.p.weight_vol,
+            weight_rev=self.p.weight_rev,
+            lookback_mom=self.p.lookback_mom,
+            lookback_vol=self.p.lookback_vol,
+            lookback_rev=self.p.lookback_rev,
+        )
+
+    def rebalance(self):
+        ranked = self._score_visible_universe()
+        if ranked.empty:
             return
 
-        # 2. Calculate Cross-Sectional Z-Scores
-        # Momentum: Higher is better
-        z_mom = self.get_zscores(raw_mom, invert=False)
-        # Volatility: Lower is better (we want safe, boring stocks)
-        z_vol = self.get_zscores(raw_vol, invert=True)
-        # Reversion: Lower is better (stock dumped hard below SMA -> buy the dip)
-        z_rev = self.get_zscores(raw_rev, invert=True)
-
-        # 3. Compile Total Scores safely handling dictionary mappings
-        total_scores = {}
-        for i, d in enumerate(valid_stocks):
-            score = (self.p.weight_mom * z_mom[i]) + \
-                    (self.p.weight_vol * z_vol[i]) + \
-                    (self.p.weight_rev * z_rev[i])
-            total_scores[d] = score
-            
-        # 4. Rank stocks and select Top N
-        valid_stocks.sort(key=lambda d: total_scores[d], reverse=True)
-        top_stocks = valid_stocks[:self.p.top_n]
+        data_by_symbol = {data._name: data for data in self.datas}
+        top_symbols = ranked.head(self.p.top_n)["symbol"].tolist()
+        top_symbol_set = set(top_symbols)
+        top_stocks = [data_by_symbol[symbol] for symbol in top_symbols if symbol in data_by_symbol]
         
         # 5. Liquidate losers
         for d in self.datas:
             pos = self.getposition(d)
-            if pos.size > 0 and d not in top_stocks:
+            if pos.size > 0 and d._name not in top_symbol_set:
                 self.close(data=d)
                 
         # 6. Reallocate to winners

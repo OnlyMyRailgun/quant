@@ -191,14 +191,16 @@ Completed so far:
 
 - Shared scoring logic now lives in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py).
 - [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) uses the shared scorer instead of maintaining a separate factor-math path.
+- [`src/strategies/multi_factor.py`](/Users/y-yang/Developer/quant/src/strategies/multi_factor.py) now routes ranking through the shared scorer via a Backtrader adapter instead of maintaining its own factor-math path.
 - Tests cover ranking parity between the shared scorer and paper-signal generation.
+- Tests now cover ranking parity across the shared scorer, the Backtrader strategy adapter, and the paper-trading path under the same weights.
 - Walk-forward parameter artifacts can now be produced by [`src/optimize.py`](/Users/y-yang/Developer/quant/src/optimize.py).
 - Approved paper-trading params can now be selected from qualified walk-forward runs and loaded by the paper trader by default.
 
 Remaining for milestone completion:
 
-- Prove research/backtest and paper-trading paths share both scoring logic and parameter source end to end.
 - Add a more explicit operator-facing approval workflow if we want approvals managed outside Python helpers.
+- Push approved parameter defaults further into the backtest CLI path if we want paper and backtest parameter sourcing to match automatically instead of by explicit weights.
 
 ### Milestone 5: Turnover and risk controls
 
