@@ -90,6 +90,8 @@ Goal:
 
 ### Milestone 2: Walk-forward decision engine
 
+Status: not started.
+
 Goal:
 
 - Replace the current one-off optimization workflow with a rolling walk-forward process.
@@ -118,6 +120,8 @@ Acceptance criteria:
 - The workflow can be rerun deterministically on the same cached data.
 
 ### Milestone 3: Explainable stock selection
+
+Status: not started.
 
 Goal:
 
@@ -148,6 +152,8 @@ Acceptance criteria:
 
 ### Milestone 4: Paper trader alignment with research pipeline
 
+Status: in progress.
+
 Goal:
 
 - Ensure live signals are generated from the same validated decision logic used in research.
@@ -169,7 +175,20 @@ Acceptance criteria:
 - Given the same date and market data, research mode and paper-trading mode produce the same ranked winners.
 - The project documents where validated parameters live and how they are refreshed.
 
+Completed so far:
+
+- Shared scoring logic now lives in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py).
+- [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py) uses the shared scorer instead of maintaining a separate factor-math path.
+- Tests cover ranking parity between the shared scorer and paper-signal generation.
+
+Remaining for milestone completion:
+
+- Load the latest validated walk-forward parameter set automatically.
+- Prove research/backtest and paper-trading paths share both scoring logic and parameter source.
+
 ### Milestone 5: Turnover and risk controls
+
+Status: not started.
 
 Goal:
 
@@ -195,6 +214,8 @@ Acceptance criteria:
 
 ### Milestone 6: Stronger test coverage
 
+Status: in progress.
+
 Goal:
 
 - Build confidence that ranking, rebalancing, and paper trading remain correct as the system evolves.
@@ -213,7 +234,21 @@ Acceptance criteria:
 - At least one regression-style test protects walk-forward output shape and saved artifacts.
 - The core milestone workflows can run in CI without requiring live network access.
 
+Completed so far:
+
+- Shared scoring behavior is covered in [`tests/scoring/test_multi_factor.py`](/Users/y-yang/Developer/quant/tests/scoring/test_multi_factor.py).
+- Artifact writing and registry behavior are covered in [`tests/research/test_artifacts.py`](/Users/y-yang/Developer/quant/tests/research/test_artifacts.py).
+- Paper-signal parity with the shared scorer is covered at the unit-test level.
+
+Remaining for milestone completion:
+
+- Add regression coverage for walk-forward outputs and parameter artifacts.
+- Add deeper rebalance-behavior coverage.
+- Confirm the core milestone workflows run cleanly in CI-oriented offline tests.
+
 ### Milestone 7: Better universe and portfolio research
+
+Status: not started.
 
 Goal:
 
@@ -234,6 +269,8 @@ Acceptance criteria:
 - Universe definition is explicit and reproducible for a given experiment.
 
 ### Milestone X: Research Platform Foundation
+
+Status: in progress.
 
 Goal:
 
@@ -285,6 +322,19 @@ Recommended priority:
 8. Calendar and Rebalance Policy
 9. Strategy Lifecycle States
 10. Universe Governance
+
+Completed so far:
+
+- Unified Scoring Core in [`src/scoring/multi_factor.py`](/Users/y-yang/Developer/quant/src/scoring/multi_factor.py)
+- Experiment Registry in [`src/research/registry.py`](/Users/y-yang/Developer/quant/src/research/registry.py)
+- Research Artifact Store in [`src/research/artifacts.py`](/Users/y-yang/Developer/quant/src/research/artifacts.py)
+- Paper-signal integration through [`src/paper/bot.py`](/Users/y-yang/Developer/quant/src/paper/bot.py)
+
+Next foundation slice:
+
+- Walk-forward optimization artifacts and validated-parameter loading
+- Benchmark comparison output
+- Data validation and diagnostics
 
 Acceptance criteria:
 
@@ -390,6 +440,8 @@ Scope:
 
 - Build Milestone 2 first.
 
+Status: next active phase.
+
 Definition of done:
 
 - We can run a walk-forward experiment end to end.
@@ -409,16 +461,17 @@ Scope:
 
 - Build Milestone 4 immediately after Milestone 2.
 
+Status: partially de-risked by the shared scoring core, but blocked on Milestone 2 parameter artifacts.
+
 Definition of done:
 
 - Live paper-trading signals and research backtests share the same scoring logic and parameter source.
 
 Suggested implementation tasks:
 
-1. Extract factor scoring into a shared module.
-2. Update the Backtrader strategy to consume shared score calculations where practical.
-3. Update the paper trader to read validated parameters from the walk-forward artifact.
-4. Add a parity test between research ranking and paper-trading ranking.
+1. Backtest/research path should consume the same shared scorer where practical.
+2. Update the paper trader to read validated parameters from the walk-forward artifact.
+3. Add a parity test between research ranking and paper-trading ranking under the validated parameter source.
 
 ### Phase 3: Make stock picks explainable
 
@@ -484,7 +537,7 @@ That gives the project a stronger decision foundation before we invest in more l
 If we want the best sequence from here, the recommended order is:
 
 1. Build walk-forward optimization.
-2. Unify research and paper-trading scoring logic.
+2. Finish validated-parameter alignment between research and paper trading.
 3. Add explainability output for each rebalance.
 4. Add turnover controls.
 5. Deepen tests.
@@ -520,5 +573,6 @@ uv run pytest -q
 
 - The current system is best understood as a research prototype with real momentum toward a more disciplined portfolio engine.
 - The strongest completed capability today is cross-sectional stock ranking and top-`N` portfolio selection.
+- The shared scoring core and experiment artifact foundation are now in place for paper-signal generation.
 - The highest-value next milestone is making those buy decisions walk-forward validated and consistent between backtest and paper trading.
 - Python dependencies are now managed through `uv` using [`pyproject.toml`](/Users/y-yang/Developer/quant/pyproject.toml) and `uv.lock`.
