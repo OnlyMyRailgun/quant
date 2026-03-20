@@ -217,5 +217,6 @@ __marimo__/
 
 .DS_Store
 .data_cache
+.research_artifacts/
 .superpowers
 .worktrees

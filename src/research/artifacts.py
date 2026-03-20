@@ -68,3 +68,42 @@ def write_scoring_run(
         "scores": scores_path,
         "summary": summary_path,
     }
+
+
+def write_walk_forward_run(
+    base_dir: Path,
+    metadata: dict,
+    weights: pd.DataFrame,
+    summary: dict,
+) -> dict[str, Path]:
+    run_name = "walk_forward"
+    run_id = create_run_id(run_name)
+    run_dir = base_dir / run_name / f"{_timestamp()}-{run_id.split('-', 1)[-1]}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_path = run_dir / "metadata.json"
+    weights_path = run_dir / "weights.csv"
+    summary_path = run_dir / "summary.json"
+
+    metadata_payload = {"run_id": run_id, "run_name": run_name, **metadata}
+    metadata_path.write_text(json.dumps(metadata_payload, indent=2, sort_keys=True), encoding="utf-8")
+    weights.to_csv(weights_path, index=False)
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+    registry_entry = {
+        "run_id": run_id,
+        "run_name": run_name,
+        "run_dir": str(run_dir),
+        "metadata": str(metadata_path),
+        "weights": str(weights_path),
+        "summary": str(summary_path),
+        "created_at": _timestamp(),
+    }
+    append_run_record(base_dir / "registry.jsonl", registry_entry)
+
+    return {
+        "run_dir": run_dir,
+        "metadata": metadata_path,
+        "weights": weights_path,
+        "summary": summary_path,
+    }
