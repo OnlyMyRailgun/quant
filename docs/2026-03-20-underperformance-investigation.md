@@ -219,3 +219,166 @@ After validation, the current priority order looks like this:
 1. `top_n` / portfolio breadth is the strongest confirmed structural issue
 2. the all-zero tuple is a genuine optimizer flaw, but not the main reason `broad_50` loses
 3. even after addressing those two issues directionally, the current factor model still appears too weak to reliably beat `TOPIX`
+
+## Post-Diagnostic Factor Research
+
+After removing look-ahead bias and aligning diagnostics to real monthly rebalance events, the initial factor conclusion changed materially.
+
+Most important correction:
+
+- the earlier "momentum is obviously strong" conclusion was polluted by diagnostic leakage and should not be used
+- under the repaired diagnostic path, the current `90`-day momentum signal is weak-to-mixed rather than clearly strong
+- `20`-day volatility now looks more credible than previously believed
+
+### Repaired Diagnostic Baseline: `90d` Momentum vs Current `vol` / `rev`
+
+Artifacts from the repaired three-factor reruns:
+
+- `topix_top_10`: `/Users/y-yang/Developer/quant/.research_artifacts/walk_forward/walk_forward/20260321T141103Z-20260321T141103Z-5d89c1fb`
+- `japan_large_30`: `/Users/y-yang/Developer/quant/.research_artifacts/walk_forward/walk_forward/20260321T141725Z-20260321T141725Z-81458eba`
+- `japan_broad_50`: `/Users/y-yang/Developer/quant/.research_artifacts/walk_forward/walk_forward/20260321T141745Z-20260321T141745Z-fcc5b238`
+
+Window-level mean IC from those repaired runs:
+
+| Universe | `mom` IC mean | `vol` IC mean | `rev` IC mean |
+| --- | ---: | ---: | ---: |
+| `topix_top_10` | `-0.0382` | `0.0636` | `0.0473` |
+| `japan_large_30` | `0.0259` | `0.1140` | `0.0072` |
+| `japan_broad_50` | `-0.0029` | `0.0743` | `-0.0190` |
+
+Interpretation:
+
+- current `90d` momentum is not a stable winner under the repaired research path
+- `vol` is the most consistently positive factor among the three current factors
+- `rev` is weak, but no longer supported as a simple "always negative, definitely remove it" conclusion
+
+### Horizon Check: `90d` Momentum vs Classic `12-1` Momentum
+
+Using the repaired monthly rebalance diagnostics path, a research-only comparison of momentum horizons produced:
+
+| Universe | `90d` mean IC | `12-1` mean IC |
+| --- | ---: | ---: |
+| `topix_top_10` | `-0.0382` | `-0.0433` |
+| `japan_large_30` | `0.0259` | `0.0951` |
+| `japan_broad_50` | `-0.0029` | `0.0419` |
+
+Interpretation:
+
+- on the more relevant `japan_large_30` and `japan_broad_50` universes, `12-1` momentum is meaningfully better than the current `90d` definition
+- `topix_top_10` remains too noisy to drive the direction of factor redesign
+- future momentum research should start from `12-1`, not from the current `90d` lookback
+
+### Research-Only Walk-Forward Approximation
+
+To compare candidate single-factor directions before changing production strategy code, a research-only monthly rebalance approximation was run for:
+
+- `12-1 mom-only`
+- `vol-only`
+- `12-1 mom + vol`
+
+Important caveat:
+
+- this is not the Backtrader production path
+- it does not simulate transaction costs, slippage, or exact live order timing
+- the absolute return levels below should not be compared directly to `TOPIX`
+- the reliable signal from this experiment is the ranking relationship between factor variants, not the headline return number
+
+Results:
+
+| Universe | `12-1 mom-only` | `vol-only` | `12-1 mom + vol` |
+| --- | ---: | ---: | ---: |
+| `topix_top_10` | `28.1351%` | `35.5768%` | `14.7990%` |
+| `japan_large_30` | `31.4158%` | `43.7148%` | `33.2851%` |
+| `japan_broad_50` | `31.5875%` | `36.0344%` | `17.9833%` |
+
+Ordering relationship:
+
+- `vol-only` > `12-1 mom-only` > `12-1 mom + vol`
+
+Interpretation:
+
+- `12-1 mom-only` clearly improves on the old `90d mom-only` direction
+- `vol-only` is strong enough to treat as a core candidate factor, not a secondary add-on
+- naive linear combination of `12-1` momentum and `vol` degrades results instead of improving them
+
+### Working Hypothesis For The `12-1 + vol` Degradation
+
+The most likely explanation is factor overlap or partial cancellation in the cross-section.
+
+This is still a hypothesis, not a confirmed conclusion.
+
+What is currently justified:
+
+- the combined signal is worse than either single-factor signal in the research-only approximation
+- a plausible next check is the cross-sectional correlation between `12-1` momentum and `vol`
+- if that correlation is meaningfully negative, simple linear mixing may be diluting both signals instead of improving ranking power
+
+### Follow-Up Diagnostic: Top-of-Book Dilution
+
+That follow-up check was run directly on the repaired monthly rebalance path.
+
+What was tested:
+
+- for each validation window
+- for each monthly rebalance event inside that window
+- compare the concrete `top_n` names selected by:
+  - `12-1 mom-only`
+  - `vol-only`
+
+Observed average `top_n` overlap:
+
+| Universe | Effective `top_n` | Mean overlap |
+| --- | ---: | ---: |
+| `topix_top_10` | `3` | `38.3%` |
+| `japan_large_30` | `8` | `32.3%` |
+| `japan_broad_50` | `13` | `18.8%` |
+
+Interpretation:
+
+- even when `12-1 mom` and `vol` point in a similar window-level direction, they often select very different top-ranked names
+- the mixed signal therefore changes the actual holdings materially, not just the ordering of marginal names
+- this strongly supports a top-of-book dilution explanation for why `12-1 mom + vol` underperforms the two single-factor variants
+
+Important boundary condition:
+
+- this conclusion is specific to the current holding-construction style, especially the current `top_n` scale and hard top-`N` equal-weight selection
+- if the portfolio moves to wider holdings or layered/graded position sizing, the strength of the dilution effect may change and should be re-validated
+
+### Structural Note: Small Portfolios Amplify Ranking Disturbance
+
+The overlap result also reinforces a broader construction point:
+
+- when the portfolio holds only a small number of names, any factor-combination-induced ranking disturbance becomes a large portfolio weight change
+- this is not just a factor-design issue; it is also a portfolio-construction sensitivity issue
+
+Implication:
+
+- some of the observed degradation from factor mixing may be reduced by broader or more graduated portfolio construction, even without changing the underlying factor set
+
+### Updated Research Priority
+
+After the repaired diagnostics and first research-only follow-up, the next research order is:
+
+1. treat current `90d` momentum as a deprecated baseline, not the preferred momentum definition
+2. continue factor work with `12-1` momentum and `vol` as the two serious candidates
+3. investigate why `12-1 mom + vol` underperforms the single-factor variants before proposing any multi-factor replacement
+4. keep absolute-return claims conservative until the candidate factors have been validated through the real production-path strategy implementation
+
+## Next-Stage Research Directions
+
+With the current investigation complete, the next-stage options can now be prioritized more explicitly:
+
+| Direction | Expected impact | Implementation cost | Priority |
+| --- | --- | --- | ---: |
+| Replace current `90d mom` with `12-1 mom` | High: repaired IC is clearly better on `large_30` and `broad_50` | Low | `1` |
+| Change the optimization target away from pure `return_pct` toward a more risk-aware objective such as `Sharpe` | High: directly addresses the confirmed overfitting behavior | Low | `1` |
+| Use a dynamic holding-count rule such as `sqrt(N)` | Medium: likely reduces sensitivity to top-rank disturbance | Low | `2` |
+| Favor single-factor baselines first, then revisit combination logic | Medium: avoids mixing signals before they are individually validated in the live research path | Low | `2` |
+| Introduce a value factor such as `P/B` | Unknown until tested; may offer a more complementary signal family | High: requires financial-data access and integration | `3` |
+
+Recommended order for the next implementation/research slice:
+
+1. migrate momentum research from `90d` to `12-1`
+2. change optimizer selection away from pure `return_pct`
+3. revisit portfolio breadth, including `sqrt(N)`-style holding rules
+4. only after that, test new factor families such as value
