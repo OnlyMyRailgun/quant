@@ -6,7 +6,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,10 @@ RAW_SUBDIR = ".data_store/raw"
 CATALOG_SUBDIR = ".data_store/catalog"
 MANIFEST_FILENAME = "manifest.jsonl"
 Fetcher = Callable[[str, str, str], pd.DataFrame]
+
+
+class LocalDataSyncRequiredError(RuntimeError):
+    """Raised when the validated local history must be refreshed before loading."""
 
 
 def _resolve_root(root: Path | str | None) -> Path:
@@ -71,6 +75,7 @@ class ManifestRecord:
     last_synced: datetime
     validation_status: str
     validation_issues: list[str]
+    expected_dates_source: str | None = None
 
     def __post_init__(self) -> None:  # pylint: disable=assigning-non-slot
         normalized = _normalize_datetime(self.last_synced)
@@ -94,6 +99,7 @@ class ManifestRecord:
             "last_synced": self.last_synced.isoformat().replace("+00:00", "Z"),
             "validation_status": self.validation_status,
             "validation_issues": self.validation_issues,
+            "expected_dates_source": self.expected_dates_source,
         }
 
     @classmethod
@@ -118,6 +124,7 @@ class ManifestRecord:
             last_synced=last_synced,
             validation_status=data["validation_status"],
             validation_issues=list(data.get("validation_issues", [])),
+            expected_dates_source=data.get("expected_dates_source"),
         )
 
 
@@ -215,7 +222,11 @@ def _prepare_fetched_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return normalized.reset_index(drop=True)
 
 
-def build_validation_summary(frame: pd.DataFrame) -> dict[str, Any]:
+def build_validation_summary(
+    frame: pd.DataFrame,
+    expected_dates: Iterable[str | date | datetime] | None = None,
+    expected_dates_source: str | None = None,
+) -> dict[str, Any]:
     issues: list[str] = []
     if "Date" not in frame.columns or frame.empty:
         return {
@@ -227,6 +238,7 @@ def build_validation_summary(frame: pd.DataFrame) -> dict[str, Any]:
             "trading_days_actual": 0,
             "validated_start": None,
             "validated_end": None,
+            "expected_dates_source": None,
         }
 
     with warnings.catch_warnings():
@@ -250,6 +262,7 @@ def build_validation_summary(frame: pd.DataFrame) -> dict[str, Any]:
             "trading_days_actual": 0,
             "validated_start": None,
             "validated_end": None,
+            "expected_dates_source": None,
         }
 
     if not valid_ts.is_monotonic_increasing:
@@ -269,21 +282,30 @@ def build_validation_summary(frame: pd.DataFrame) -> dict[str, Any]:
 
     validated_start = valid_ts.min().date()
     validated_end = valid_ts.max().date()
-    expected_range = pd.date_range(validated_start, validated_end, freq="B")
-    observed = valid_ts.dt.normalize()
-    if observed.dt.tz is not None:
-        observed = observed.dt.tz_convert(timezone.utc).dt.tz_localize(None)
+    expected_range_values: pd.Index | pd.Series | pd.DatetimeIndex
+    source_used: str | None = None
+    if expected_dates:
+        normalized_expected = _normalize_expected_dates(expected_dates)
+        if not normalized_expected.empty:
+            expected_range_values = normalized_expected
+            source_used = expected_dates_source
+        else:
+            expected_range_values = pd.date_range(validated_start, validated_end, freq="B")
+    else:
+        expected_range_values = pd.date_range(validated_start, validated_end, freq="B")
+    expected_range_values = pd.Index(expected_range_values)
+    observed = valid_ts.dt.tz_convert(timezone.utc).dt.tz_localize(None).dt.normalize()
     observed = observed.drop_duplicates()
     observed_set = set(observed)
     missing = [
         dt.strftime("%Y-%m-%d")
-        for dt in expected_range
-        if dt.normalize() not in observed_set
+        for dt in expected_range_values
+        if dt not in observed_set
     ]
 
     missing_count = len(missing)
     missing_samples = missing[:5]
-    trading_days_expected = len(expected_range)
+    trading_days_expected = len(expected_range_values)
     trading_days_actual = len(observed)
     missing_ratio = (
         missing_count / trading_days_expected if trading_days_expected else 0.0
@@ -319,6 +341,7 @@ def build_validation_summary(frame: pd.DataFrame) -> dict[str, Any]:
         "trading_days_actual": trading_days_actual,
         "validated_start": validated_start,
         "validated_end": validated_end,
+        "expected_dates_source": source_used,
     }
 
 
@@ -327,12 +350,29 @@ def _coerce_date_range(value: str | date) -> tuple[str, date]:
     return timestamp.strftime("%Y-%m-%d"), timestamp.date()
 
 
+def _coerce_date_value(value: str | date) -> date:
+    return pd.Timestamp(value).date()
+
+
+def _normalize_expected_dates(
+    expected_dates: Iterable[str | date | datetime],
+) -> pd.Series:
+    normalized = pd.Series(pd.to_datetime(list(expected_dates), errors="coerce"))
+    normalized = _ensure_series_utc(normalized)
+    normalized = normalized.dt.tz_convert(timezone.utc)
+    normalized = normalized.dt.tz_localize(None)
+    return normalized.dt.normalize().dropna().drop_duplicates().sort_values()
+
+
 def sync_symbol_history(
     symbol: str,
     start_date: str | date,
     end_date: str | date,
     root: Path | str | None = None,
     fetcher: Fetcher | None = None,
+    fetched_frame: pd.DataFrame | None = None,
+    expected_dates: Iterable[str | date | datetime] | None = None,
+    expected_dates_source: str | None = None,
 ) -> ManifestRecord:
     """Fetch the requested range, validate the merged history, and log a manifest entry."""
     fetch_fn = fetcher or fetch_daily_data
@@ -347,10 +387,19 @@ def sync_symbol_history(
     start_str, downloaded_start = _coerce_date_range(start_date)
     end_str, downloaded_end = _coerce_date_range(end_date)
 
-    fetched_raw = fetch_fn(symbol, start_str, end_str)
-    prepared = _prepare_fetched_frame(fetched_raw)
+    if fetched_frame is None:
+        fetched_raw = fetch_fn(symbol, start_str, end_str)
+        prepared = _prepare_fetched_frame(fetched_raw)
+    else:
+        prepared = fetched_frame.copy()
+        if "Date" not in prepared.columns:
+            prepared = _prepare_fetched_frame(prepared)
     merged = merge_symbol_frames(existing, prepared)
-    summary = build_validation_summary(merged)
+    summary = build_validation_summary(
+        merged,
+        expected_dates=expected_dates,
+        expected_dates_source=expected_dates_source,
+    )
     is_valid = summary["validation_status"] != "invalid"
 
     write_raw_parquet(symbol, merged, root=root_path)
@@ -368,6 +417,7 @@ def sync_symbol_history(
         last_synced=datetime.now(timezone.utc),
         validation_status=summary["validation_status"],
         validation_issues=summary["validation_issues"],
+        expected_dates_source=summary.get("expected_dates_source"),
     )
 
     append_manifest_record(record, root=root_path)
@@ -382,6 +432,31 @@ def sync_universe_history(
     fetcher: Fetcher | None = None,
 ) -> dict[str, ManifestRecord]:
     """Sync multiple symbols by delegating to sync_symbol_history."""
+    fetch_fn = fetcher or fetch_daily_data
+    start_str, _ = _coerce_date_range(start_date)
+    end_str, _ = _coerce_date_range(end_date)
+
+    fetched_frames: dict[str, pd.DataFrame] = {}
+    expected_dates_set: set[date] = set()
+    for symbol in symbols:
+        fetched_raw = fetch_fn(symbol, start_str, end_str)
+        prepared = _prepare_fetched_frame(fetched_raw)
+        fetched_frames[symbol] = prepared
+
+        if not prepared.empty:
+            dates = _ensure_series_utc(
+                pd.to_datetime(prepared["Date"], errors="coerce")
+            )
+            dates = dates.dt.tz_convert(timezone.utc)
+            dates = dates.dt.tz_localize(None)
+            dates = dates.dt.normalize().dropna()
+            expected_dates_set.update(dates.dt.date.tolist())
+
+    expected_dates_list = (
+        sorted(expected_dates_set) if expected_dates_set else None
+    )
+    expected_dates_source = "universe_union" if expected_dates_list else None
+
     records: dict[str, ManifestRecord] = {}
     for symbol in symbols:
         records[symbol] = sync_symbol_history(
@@ -390,5 +465,120 @@ def sync_universe_history(
             end_date,
             root=root,
             fetcher=fetcher,
+            fetched_frame=fetched_frames.get(symbol),
+            expected_dates=expected_dates_list,
+            expected_dates_source=expected_dates_source,
         )
     return records
+
+
+def load_local_symbol(
+    symbol: str,
+    start_date: str | date,
+    end_date: str | date,
+    warmup: int = 0,
+    allowed_validation_statuses: tuple[str, ...] = ("ok",),
+    root: Path | str | None = None,
+) -> pd.DataFrame:
+    """Return validated local rows for the requested window plus optional warmup."""
+    sanitized = _sanitize_symbol(symbol)
+    root_path = _resolve_root(root)
+    request_start = _coerce_date_value(start_date)
+    request_end = _coerce_date_value(end_date)
+    if request_start > request_end:
+        raise ValueError("start_date must not be after end_date")
+    if warmup < 0:
+        raise ValueError("warmup must be greater than or equal to zero")
+
+    manifest = read_latest_manifest_record(sanitized, root=root_path)
+    if manifest is None:
+        raise LocalDataSyncRequiredError(f"{symbol} requires a manifest sync before loading")
+
+    if manifest.validated_start is None or manifest.validated_end is None:
+        raise LocalDataSyncRequiredError(
+            f"{symbol} lacks validated coverage; sync required"
+        )
+
+    if request_start < manifest.validated_start or request_end > manifest.validated_end:
+        raise LocalDataSyncRequiredError(
+            f"{symbol} validated coverage ({manifest.validated_start}..{manifest.validated_end}) "
+            f"is insufficient for request ({request_start}..{request_end})"
+        )
+
+    allowed_status = tuple(allowed_validation_statuses)
+    if manifest.validation_status not in allowed_status:
+        raise ValueError(
+            f"{symbol} manifest validation status {manifest.validation_status} is not allowed"
+        )
+
+    raw_path = get_raw_path(sanitized, root=root_path)
+    if not raw_path.exists():
+        raise LocalDataSyncRequiredError(f"{symbol} raw history is missing; sync required")
+
+    frame = pd.read_parquet(raw_path)
+    if "Date" not in frame.columns:
+        raise ValueError("local history must include a Date column")
+
+    normalized = frame.copy()
+    normalized["Date"] = pd.to_datetime(normalized["Date"], errors="coerce")
+    normalized["Date"] = _ensure_series_utc(normalized["Date"])
+    normalized = normalized.dropna(subset=["Date"])
+    if normalized.empty:
+        raise LocalDataSyncRequiredError(f"{symbol} has no readable rows in local cache")
+
+    normalized = normalized.sort_values("Date", kind="mergesort").reset_index(drop=True)
+    validated_start_ts = pd.Timestamp(manifest.validated_start)
+    validated_end_ts = pd.Timestamp(manifest.validated_end)
+    normalized_dates = normalized["Date"].dt.tz_convert(timezone.utc)
+    normalized_dates = normalized_dates.dt.tz_localize(None).dt.normalize()
+    validated_mask = (
+        (normalized_dates >= validated_start_ts)
+        & (normalized_dates <= validated_end_ts)
+    )
+    validated = normalized.loc[validated_mask].reset_index(drop=True)
+    validated_dates = normalized_dates[validated_mask].reset_index(drop=True)
+    if validated.empty:
+        raise LocalDataSyncRequiredError(
+            f"{symbol} lacks rows inside validated coverage; sync required"
+        )
+
+    request_start_ts = pd.Timestamp(request_start)
+    request_end_ts = pd.Timestamp(request_end)
+    requested_mask = (
+        (validated_dates >= request_start_ts)
+        & (validated_dates <= request_end_ts)
+    )
+    if not requested_mask.any():
+        raise LocalDataSyncRequiredError(
+            f"{symbol} has no validated rows for {request_start}..{request_end}"
+        )
+
+    indices = validated.index[requested_mask]
+    start_idx = indices[0]
+    end_idx = indices[-1]
+    slice_start = max(0, start_idx - warmup)
+    subset = validated.loc[slice_start : end_idx].reset_index(drop=True)
+    return subset.copy()
+
+
+def load_local_universe(
+    symbols: list[str],
+    start_date: str | date,
+    end_date: str | date,
+    warmup: int = 0,
+    allowed_validation_statuses: tuple[str, ...] = ("ok",),
+    root: Path | str | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Load multiple symbols while applying shared validation rules."""
+    root_path = _resolve_root(root)
+    universe: dict[str, pd.DataFrame] = {}
+    for symbol in symbols:
+        universe[symbol] = load_local_symbol(
+            symbol,
+            start_date,
+            end_date,
+            warmup=warmup,
+            allowed_validation_statuses=allowed_validation_statuses,
+            root=root_path,
+        )
+    return universe

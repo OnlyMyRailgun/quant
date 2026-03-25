@@ -25,6 +25,7 @@ def _make_manifest_record(
     issues: list[str] | None = None,
     trading_expected: int = 5,
     trading_actual: int = 5,
+    expected_dates_source: str | None = None,
 ) -> local_store.ManifestRecord:
     return local_store.ManifestRecord(
         symbol=symbol,
@@ -39,6 +40,7 @@ def _make_manifest_record(
         last_synced=last_synced,
         validation_status=status,
         validation_issues=issues or [],
+        expected_dates_source=expected_dates_source,
     )
 
 
@@ -363,3 +365,254 @@ def test_sync_symbol_history_invalid_missing_data(tmp_path):
     assert record.validated_start is None
     assert record.validated_end is None
     assert "missing_data" in record.validation_issues
+
+
+def test_load_local_symbol_returns_range_with_warmup(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=12, freq="B")
+    frame = pd.DataFrame({"Date": dates, "Close": range(len(dates))})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    manifest = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc),
+        validated_start=dates[0].date(),
+        validated_end=dates[-1].date(),
+    )
+    local_store.append_manifest_record(manifest, root=tmp_path)
+
+    start = dates[5]
+    end = dates[8]
+    loaded = local_store.load_local_symbol("FOO", start.date(), end.date(), warmup=2, root=tmp_path)
+
+    expected = dates[3:9]
+    actual = pd.to_datetime(loaded["Date"]).dt.tz_convert(timezone.utc).dt.tz_localize(None).dt.normalize()
+    assert len(loaded) == len(expected)
+    assert actual.tolist() == expected.normalize().tolist()
+
+
+def test_load_local_symbol_prefers_latest_manifest_record(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=6, freq="B")
+    frame = pd.DataFrame({"Date": dates, "Close": range(len(dates))})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    old_manifest = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc),
+        validated_start=dates[0].date(),
+        validated_end=dates[2].date(),
+    )
+    new_manifest = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 2, 9, 0, tzinfo=timezone.utc),
+        validated_start=dates[0].date(),
+        validated_end=dates[-1].date(),
+    )
+    local_store.append_manifest_record(old_manifest, root=tmp_path)
+    local_store.append_manifest_record(new_manifest, root=tmp_path)
+
+    loaded = local_store.load_local_symbol(
+        "FOO",
+        dates[3].date(),
+        dates[-1].date(),
+        root=tmp_path,
+    )
+
+    assert not loaded.empty
+    assert pd.to_datetime(loaded["Date"]).dt.date.max() == dates[-1].date()
+
+
+def test_load_local_universe_rejects_invalid_symbols(tmp_path):
+    with pytest.raises(ValueError):
+        local_store.load_local_universe(
+            ["../evil"],
+            "2024-01-01",
+            "2024-01-02",
+            root=tmp_path,
+        )
+
+
+def test_load_local_universe_returns_requested_range_with_warmup(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=10, freq="B")
+    frame = pd.DataFrame({"Date": dates, "Close": range(len(dates))})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    manifest = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc),
+        validated_start=dates[0].date(),
+        validated_end=dates[-1].date(),
+    )
+    local_store.append_manifest_record(manifest, root=tmp_path)
+
+    universe = local_store.load_local_universe(
+        ["FOO"],
+        dates[3].date(),
+        dates[5].date(),
+        warmup=1,
+        root=tmp_path,
+    )
+
+    assert "FOO" in universe
+    loaded = universe["FOO"]
+    expected = dates[2:6]
+    actual = pd.to_datetime(loaded["Date"]).dt.tz_convert(timezone.utc).dt.tz_localize(None).dt.normalize()
+    assert len(loaded) == len(expected)
+    assert actual.tolist() == expected.normalize().tolist()
+
+
+def test_load_local_symbol_enforces_validation_status(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=5, freq="B")
+    frame = pd.DataFrame({"Date": dates, "Close": range(len(dates))})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    warning_manifest = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc),
+        validated_start=dates[0].date(),
+        validated_end=dates[-1].date(),
+        status="warning",
+    )
+    local_store.append_manifest_record(warning_manifest, root=tmp_path)
+
+    with pytest.raises(ValueError):
+        local_store.load_local_symbol(
+            "FOO",
+            dates[1].date(),
+            dates[3].date(),
+            root=tmp_path,
+        )
+
+    allowed = local_store.load_local_symbol(
+        "FOO",
+        dates[1].date(),
+        dates[3].date(),
+        allowed_validation_statuses=("ok", "warning"),
+        root=tmp_path,
+    )
+    assert not allowed.empty
+
+
+def test_load_local_symbol_requires_validated_coverage(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=5, freq="B")
+    frame = pd.DataFrame({"Date": dates, "Close": range(len(dates))})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    minimal_manifest = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc),
+        validated_start=None,
+        validated_end=None,
+        status="invalid",
+    )
+    local_store.append_manifest_record(minimal_manifest, root=tmp_path)
+
+    with pytest.raises(local_store.LocalDataSyncRequiredError):
+        local_store.load_local_symbol(
+            "FOO",
+            dates[1].date(),
+            dates[3].date(),
+            root=tmp_path,
+        )
+
+
+def test_load_local_symbol_rejects_invalid_symbol(tmp_path):
+    with pytest.raises(ValueError):
+        local_store.load_local_symbol("../evil", "2024-01-01", "2024-01-02", root=tmp_path)
+
+
+def test_load_local_symbol_requires_manifest(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=3, freq="B")
+    frame = pd.DataFrame({"Date": dates, "Close": range(len(dates))})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    with pytest.raises(local_store.LocalDataSyncRequiredError):
+        local_store.load_local_symbol("FOO", dates[0].date(), dates[-1].date(), root=tmp_path)
+
+
+def test_load_local_symbol_request_outside_validated_range(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=5, freq="B")
+    frame = pd.DataFrame({"Date": dates, "Close": range(len(dates))})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    manifest = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc),
+        validated_start=dates[1].date(),
+        validated_end=dates[3].date(),
+    )
+    local_store.append_manifest_record(manifest, root=tmp_path)
+
+    with pytest.raises(local_store.LocalDataSyncRequiredError):
+        local_store.load_local_symbol("FOO", dates[0].date(), dates[3].date(), root=tmp_path)
+
+    with pytest.raises(local_store.LocalDataSyncRequiredError):
+        local_store.load_local_symbol("FOO", dates[1].date(), dates[-1].date(), root=tmp_path)
+
+
+def test_load_local_symbol_handles_tz_aware_dates(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=5, freq="B", tz="Asia/Tokyo")
+    frame = pd.DataFrame({"Date": dates, "Close": range(len(dates))})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    manifest = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc),
+        validated_start=dates[0].date(),
+        validated_end=dates[-1].date(),
+    )
+    local_store.append_manifest_record(manifest, root=tmp_path)
+
+    loaded = local_store.load_local_symbol("FOO", dates[1].date(), dates[3].date(), root=tmp_path)
+    assert not loaded.empty
+    assert pd.to_datetime(loaded["Date"]).dt.tz_convert(timezone.utc).dt.date.max() == dates[3].date()
+
+
+def test_load_local_symbol_latest_invalid_manifest_blocks_load(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=4, freq="B")
+    frame = pd.DataFrame({"Date": dates, "Close": range(len(dates))})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    first = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc),
+        validated_start=dates[0].date(),
+        validated_end=dates[-1].date(),
+    )
+    second = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 2, 9, 0, tzinfo=timezone.utc),
+        validated_start=None,
+        validated_end=None,
+        status="invalid",
+    )
+    local_store.append_manifest_record(first, root=tmp_path)
+    local_store.append_manifest_record(second, root=tmp_path)
+
+    with pytest.raises(local_store.LocalDataSyncRequiredError):
+        local_store.load_local_symbol("FOO", dates[0].date(), dates[-1].date(), root=tmp_path)
+
+
+def test_load_local_symbol_handles_non_trading_start(tmp_path):
+    dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+    frame = pd.DataFrame({"Date": dates, "Close": [1, 2, 3]})
+    local_store.write_raw_parquet("FOO", frame, root=tmp_path)
+
+    manifest = _make_manifest_record(
+        "FOO",
+        datetime(2024, 3, 1, 9, 0, tzinfo=timezone.utc),
+        validated_start=date(2024, 1, 1),
+        validated_end=date(2024, 1, 5),
+    )
+    local_store.append_manifest_record(manifest, root=tmp_path)
+
+    loaded = local_store.load_local_symbol(
+        "FOO",
+        date(2024, 1, 1),
+        date(2024, 1, 4),
+        warmup=1,
+        root=tmp_path,
+    )
+
+    actual_dates = pd.to_datetime(loaded["Date"]).dt.tz_convert(timezone.utc).dt.tz_localize(None).dt.normalize()
+    assert actual_dates.iloc[0] == pd.Timestamp("2024-01-02")
+    assert actual_dates.iloc[1] == pd.Timestamp("2024-01-03")
