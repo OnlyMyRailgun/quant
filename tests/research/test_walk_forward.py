@@ -3,8 +3,10 @@ from pathlib import Path
 
 import backtrader as bt
 import pandas as pd
+import pytest
 
 import src.optimize as optimize
+from src.data import local_store
 from src.research.walk_forward import (
     aggregate_universe_participation_summary,
     build_walk_forward_windows,
@@ -980,3 +982,253 @@ def test_optimize_main_continues_when_benchmark_fetch_fails(monkeypatch, capsys)
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "Benchmark data fetch skipped:" in output
+
+
+def _make_local_frame(start: str, periods: int) -> pd.DataFrame:
+    index = pd.date_range(start, periods=periods, freq="B")
+    return pd.DataFrame(
+        {
+            "Close": [100.0 + i for i in range(len(index))],
+            "Volume": [1000 for _ in range(len(index))],
+        },
+        index=index,
+    )
+
+
+def test_walk_forward_research_can_load_local_data_without_calling_network_fetcher(
+    monkeypatch,
+    tmp_path: Path,
+):
+    symbols = ["AAA.T", "BBB.T"]
+    frames = {symbol: _make_local_frame("2023-07-03", 280) for symbol in symbols}
+
+    def fetcher(symbol: str, start: str, end: str) -> pd.DataFrame:
+        del start, end
+        return frames[symbol].copy()
+
+    local_store.sync_universe_history(
+        symbols,
+        "2023-07-03",
+        "2024-05-31",
+        root=tmp_path,
+        fetcher=fetcher,
+    )
+
+    monkeypatch.setattr(
+        optimize,
+        "fetch_universe",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("network fetcher called")),
+    )
+
+    def fake_eval(
+        data_dfs,
+        start,
+        end,
+        weights,
+        evaluation_start=None,
+        evaluation_end=None,
+    ):
+        del start, end, weights, evaluation_start, evaluation_end
+        assert set(data_dfs) == set(symbols)
+        return {"return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0, "symbol_returns": []}
+
+    monkeypatch.setattr(optimize, "evaluate_weight_tuple", fake_eval)
+
+    result = optimize.run_walk_forward_optimization(
+        data_dfs=None,
+        start="2024-01-01",
+        end="2024-05-31",
+        train_months=2,
+        validation_months=1,
+        step_months=1,
+        artifact_dir=None,
+        universe_name="local_test",
+        universe_symbols=symbols,
+        local_store_root=tmp_path,
+    )
+
+    assert int(result["summary"]["window_count"]) >= 1
+
+
+def test_walk_forward_local_optimize_defaults_to_current_directory_root(
+    monkeypatch,
+    tmp_path: Path,
+):
+    monkeypatch.chdir(tmp_path)
+
+    symbols = ["AAA.T"]
+    frames = {symbol: _make_local_frame("2023-07-03", 280) for symbol in symbols}
+
+    def fetcher(symbol: str, start: str, end: str) -> pd.DataFrame:
+        del start, end
+        return frames[symbol].copy()
+
+    # Root omitted intentionally: should resolve to current directory (tmp_path).
+    local_store.sync_universe_history(
+        symbols,
+        "2023-07-03",
+        "2024-05-31",
+        fetcher=fetcher,
+    )
+
+    monkeypatch.setattr(
+        optimize,
+        "fetch_universe",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("network fetcher called")),
+    )
+
+    def fake_eval(
+        data_dfs,
+        start,
+        end,
+        weights,
+        evaluation_start=None,
+        evaluation_end=None,
+    ):
+        del start, end, weights, evaluation_start, evaluation_end
+        assert set(data_dfs) == set(symbols)
+        return {"return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0, "symbol_returns": []}
+
+    monkeypatch.setattr(optimize, "evaluate_weight_tuple", fake_eval)
+
+    result = optimize.run_walk_forward_optimization(
+        data_dfs=None,
+        start="2024-01-01",
+        end="2024-05-31",
+        train_months=2,
+        validation_months=1,
+        step_months=1,
+        artifact_dir=None,
+        universe_name="local_test",
+        universe_symbols=symbols,
+        # local_store_root omitted intentionally.
+    )
+
+    assert int(result["summary"]["window_count"]) >= 1
+
+
+def test_local_walk_forward_loads_include_enough_warmup_for_short_validation_windows(
+    monkeypatch,
+    tmp_path: Path,
+):
+    symbols = ["AAA.T"]
+    frames = {symbol: _make_local_frame("2023-07-03", 280) for symbol in symbols}
+
+    def fetcher(symbol: str, start: str, end: str) -> pd.DataFrame:
+        del start, end
+        return frames[symbol].copy()
+
+    local_store.sync_universe_history(
+        symbols,
+        "2023-07-03",
+        "2024-05-31",
+        root=tmp_path,
+        fetcher=fetcher,
+    )
+
+    seen_eval_windows: list[tuple[str, str]] = []
+
+    def fake_eval(
+        data_dfs,
+        start,
+        end,
+        weights,
+        evaluation_start=None,
+        evaluation_end=None,
+    ):
+        del data_dfs, end, weights, evaluation_end
+        if evaluation_start is not None:
+            seen_eval_windows.append((start, evaluation_start))
+        return {"return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0, "symbol_returns": []}
+
+    monkeypatch.setattr(optimize, "evaluate_weight_tuple", fake_eval)
+
+    optimize.run_walk_forward_optimization(
+        data_dfs=None,
+        start="2024-01-01",
+        end="2024-05-31",
+        train_months=2,
+        validation_months=1,
+        step_months=1,
+        artifact_dir=None,
+        universe_name="local_test",
+        universe_symbols=symbols,
+        local_store_root=tmp_path,
+    )
+
+    assert any(
+        pd.Timestamp(slice_start) < pd.Timestamp(eval_start)
+        for slice_start, eval_start in seen_eval_windows
+    )
+
+
+def test_local_optimize_insufficient_warmup_raises_sync_required(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+
+    symbols = ["AAA.T"]
+    frames = {symbol: _make_local_frame("2024-02-15", 80) for symbol in symbols}
+
+    def fetcher(symbol: str, start: str, end: str) -> pd.DataFrame:
+        del start, end
+        return frames[symbol].copy()
+
+    local_store.sync_universe_history(
+        symbols,
+        "2024-02-15",
+        "2024-05-31",
+        fetcher=fetcher,
+    )
+
+    with pytest.raises(local_store.LocalDataSyncRequiredError) as excinfo:
+        optimize.run_walk_forward_optimization(
+            data_dfs=None,
+            start="2024-03-01",
+            end="2024-04-30",
+            train_months=1,
+            validation_months=1,
+            step_months=1,
+            artifact_dir=None,
+            universe_name="local_test",
+            universe_symbols=symbols,
+            local_warmup_bars=50,
+        )
+
+    message = str(excinfo.value).lower()
+    assert "warmup" in message
+    assert "pre-start" in message or "before" in message
+    assert "sync" in message
+
+
+def test_missing_local_validated_coverage_raises_clear_sync_required_error(
+    tmp_path: Path,
+):
+    symbols = ["AAA.T"]
+    frames = {symbol: _make_local_frame("2024-01-01", 20) for symbol in symbols}
+
+    def fetcher(symbol: str, start: str, end: str) -> pd.DataFrame:
+        del start, end
+        return frames[symbol].copy()
+
+    local_store.sync_universe_history(
+        symbols,
+        "2024-01-01",
+        "2024-01-31",
+        root=tmp_path,
+        fetcher=fetcher,
+    )
+
+    with pytest.raises(local_store.LocalDataSyncRequiredError) as excinfo:
+        optimize.run_walk_forward_optimization(
+            data_dfs=None,
+            start="2024-01-01",
+            end="2024-05-31",
+            train_months=2,
+            validation_months=1,
+            step_months=1,
+            artifact_dir=None,
+            universe_name="local_test",
+            universe_symbols=symbols,
+            local_store_root=tmp_path,
+        )
+
+    assert "sync" in str(excinfo.value).lower()

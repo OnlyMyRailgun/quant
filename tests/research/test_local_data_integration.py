@@ -4,6 +4,7 @@ from datetime import date
 
 import pandas as pd
 
+import src.main as app_main
 from src.data import local_store
 
 
@@ -79,3 +80,24 @@ def test_load_local_universe_integration_uses_cached_manifests(tmp_path):
     assert set(universe) == set(frames.keys())
     for df in universe.values():
         assert not df.empty
+
+
+def test_sync_entry_point_can_resolve_named_universe_and_sync(tmp_path):
+    universe_name = "topix_top_10"
+    symbols = set(app_main.get_universe(universe_name))
+
+    def fetcher(symbol: str, start: str, end: str) -> pd.DataFrame:
+        del start, end
+        assert symbol in symbols
+        return _make_fetch_frame("2024-01-01", 7)
+
+    records = app_main.sync_named_universe(
+        universe_name=universe_name,
+        start_date="2024-01-01",
+        end_date="2024-01-09",
+        root=tmp_path,
+        fetcher=fetcher,
+    )
+
+    assert set(records) == symbols
+    assert local_store.get_manifest_log_path(root=tmp_path).exists()

@@ -477,6 +477,7 @@ def load_local_symbol(
     start_date: str | date,
     end_date: str | date,
     warmup: int = 0,
+    strict_warmup: bool = False,
     allowed_validation_statuses: tuple[str, ...] = ("ok",),
     root: Path | str | None = None,
 ) -> pd.DataFrame:
@@ -502,7 +503,7 @@ def load_local_symbol(
     if request_start < manifest.validated_start or request_end > manifest.validated_end:
         raise LocalDataSyncRequiredError(
             f"{symbol} validated coverage ({manifest.validated_start}..{manifest.validated_end}) "
-            f"is insufficient for request ({request_start}..{request_end})"
+            f"is insufficient for request ({request_start}..{request_end}); sync required"
         )
 
     allowed_status = tuple(allowed_validation_statuses)
@@ -556,6 +557,12 @@ def load_local_symbol(
     indices = validated.index[requested_mask]
     start_idx = indices[0]
     end_idx = indices[-1]
+    available_warmup = int(start_idx)
+    if strict_warmup and warmup > available_warmup:
+        raise LocalDataSyncRequiredError(
+            f"{symbol} requires {warmup} warmup bars before {request_start} but only "
+            f"{available_warmup} are available in validated local history; sync more pre-start history"
+        )
     slice_start = max(0, start_idx - warmup)
     subset = validated.loc[slice_start : end_idx].reset_index(drop=True)
     return subset.copy()
@@ -566,6 +573,7 @@ def load_local_universe(
     start_date: str | date,
     end_date: str | date,
     warmup: int = 0,
+    strict_warmup: bool = False,
     allowed_validation_statuses: tuple[str, ...] = ("ok",),
     root: Path | str | None = None,
 ) -> dict[str, pd.DataFrame]:
@@ -578,6 +586,7 @@ def load_local_universe(
             start_date,
             end_date,
             warmup=warmup,
+            strict_warmup=strict_warmup,
             allowed_validation_statuses=allowed_validation_statuses,
             root=root_path,
         )
