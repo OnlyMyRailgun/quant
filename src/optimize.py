@@ -9,6 +9,7 @@ import backtrader as bt
 import pandas as pd
 
 from src.data.bulk_loader import fetch_universe
+from src.data import local_store
 from src.data.universe import (
     format_unknown_universe_message,
     get_topix_top_10,
@@ -77,6 +78,68 @@ class SymbolReturnAnalyzer(bt.Analyzer):
 
         rows.sort(key=lambda row: str(row["symbol"]))
         return {"symbol_returns": rows}
+
+
+class WindowReturnAnalyzer(bt.Analyzer):
+    """Computes a simple return over an evaluation sub-window.
+
+    This is used to support warmup bars (history before the evaluation start) without
+    requiring the strategy to manage an explicit warmup/trading toggle.
+    """
+
+    params = dict(evaluation_start=None, evaluation_end=None)
+
+    def start(self):
+        evaluation_start = self.p.evaluation_start
+        evaluation_end = self.p.evaluation_end
+        if evaluation_start is None or evaluation_end is None:
+            raise ValueError("evaluation_start and evaluation_end are required")
+
+        self._evaluation_start = pd.Timestamp(evaluation_start).date()
+        self._evaluation_end = pd.Timestamp(evaluation_end).date()
+        if self._evaluation_end < self._evaluation_start:
+            raise ValueError("evaluation_end must be on or after evaluation_start")
+
+        self._start_value: float | None = None
+        self._end_value: float | None = None
+
+    def next(self):
+        current = self.strategy.datetime.date(0)
+        if self._start_value is None and current >= self._evaluation_start:
+            self._start_value = float(self.strategy.broker.getvalue())
+
+        if current <= self._evaluation_end:
+            self._end_value = float(self.strategy.broker.getvalue())
+
+    def get_analysis(self):
+        if self._start_value is None or self._end_value is None:
+            return {"return_pct": 0.0}
+        if self._start_value <= 0.0:
+            return {"return_pct": 0.0}
+        return {"return_pct": round(((self._end_value / self._start_value) - 1.0) * 100.0, 4)}
+
+
+def _prepare_price_frame_for_backtrader(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normalize local-store frames (Date column) into the indexed format expected elsewhere."""
+    normalized = frame.copy()
+    if "Date" in normalized.columns:
+        dates = pd.to_datetime(normalized["Date"], errors="coerce", utc=True)
+        dates = dates.dt.tz_convert(None)
+        normalized["Date"] = dates
+        normalized = normalized.dropna(subset=["Date"])
+        normalized = normalized.sort_values("Date", kind="mergesort")
+        normalized = normalized.drop_duplicates(subset=["Date"], keep="last")
+        normalized = normalized.set_index("Date")
+    else:
+        index = pd.to_datetime(normalized.index, errors="coerce")
+        if getattr(index, "tz", None) is not None:
+            index = index.tz_convert(None)
+        normalized.index = index
+        normalized = normalized.loc[~normalized.index.isna()].sort_index(kind="mergesort")
+
+    if getattr(normalized.index, "tz", None) is not None:
+        normalized.index = normalized.index.tz_convert(None)
+    return normalized
 
 
 def suppress_output(strategy_class):
@@ -204,9 +267,13 @@ def evaluate_weight_tuple(
     end: str,
     weights: tuple[float, float, float],
     momentum_definition: str = "90d",
+    evaluation_start: str | None = None,
+    evaluation_end: str | None = None,
 ) -> dict[str, float]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
+    eval_start = evaluation_start or start
+    eval_end = evaluation_end or end
 
     warmup_bars = max(DEFAULT_LOOKBACK_MOM, DEFAULT_LOOKBACK_VOL, DEFAULT_LOOKBACK_REV)
     window_dfs = _slice_window_data(data_dfs, start, end, warmup_bars=warmup_bars)
@@ -258,18 +325,30 @@ def evaluate_weight_tuple(
     cerebro.broker.addcommissioninfo(JapanStockCommission())
     cerebro.broker.set_coc(True)
     cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
+    cerebro.addanalyzer(
+        WindowReturnAnalyzer,
+        _name="window_return",
+        evaluation_start=eval_start,
+        evaluation_end=eval_end,
+    )
     cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe")
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
     cerebro.addanalyzer(SymbolReturnAnalyzer, _name="symbol_returns")
 
     strategy = cerebro.run(runonce=False, preload=True)[0]
     returns = strategy.analyzers.returns.get_analysis()
+    window_return = strategy.analyzers.window_return.get_analysis()
     sharpe = strategy.analyzers.sharpe.get_analysis().get("sharperatio")
     drawdown = strategy.analyzers.drawdown.get_analysis().get("max", {}).get("drawdown", 0.0)
     symbol_returns = strategy.analyzers.symbol_returns.get_analysis().get("symbol_returns", [])
 
+    if eval_start == start and eval_end == end:
+        return_pct = round(returns.get("rtot", 0.0) * 100, 4)
+    else:
+        return_pct = float(window_return.get("return_pct", 0.0))
+
     return {
-        "return_pct": round(returns.get("rtot", 0.0) * 100, 4),
+        "return_pct": return_pct,
         "sharpe": round(sharpe if sharpe is not None else 0.0, 4),
         "drawdown": round(drawdown, 4),
         "symbol_returns": symbol_returns,
@@ -304,7 +383,7 @@ def _format_contributor_summary(contributors: list[dict[str, object]]) -> str:
 
 
 def run_walk_forward_optimization(
-    data_dfs: dict[str, pd.DataFrame],
+    data_dfs: dict[str, pd.DataFrame] | None,
     start: str,
     end: str,
     train_months: int = 12,
@@ -315,6 +394,9 @@ def run_walk_forward_optimization(
     universe_name: str | None = None,
     universe_symbols: list[str] | None = None,
     momentum_definition: str = "90d",
+    local_store_root: Path | str | None = None,
+    local_warmup_bars: int | None = None,
+    local_allowed_validation_statuses: tuple[str, ...] = ("ok",),
 ) -> dict[str, object]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -332,6 +414,189 @@ def run_walk_forward_optimization(
             for benchmark_name, benchmark_df in benchmark_data_dfs.items()
         }
 
+    def _resolve_default_warmup_bars() -> int:
+        params = getattr(UniversalMultiFactor, "params", None)
+        lookbacks = []
+        for field in ("lookback_mom", "lookback_vol", "lookback_rev"):
+            value = getattr(params, field, None)
+            if value is None:
+                continue
+            try:
+                lookbacks.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        warmup = max(lookbacks) if lookbacks else 0
+        if warmup <= 0:
+            warmup = 90
+        # Small buffer to cover indicator edge cases.
+        return warmup + 5
+
+    def _load_local_window(
+        symbols: list[str],
+        window_start: str,
+        window_end: str,
+    ) -> tuple[dict[str, pd.DataFrame], str]:
+        loaded = local_store.load_local_universe(
+            symbols,
+            window_start,
+            window_end,
+            warmup=local_warmup_bars if local_warmup_bars is not None else _resolve_default_warmup_bars(),
+            strict_warmup=True,
+            allowed_validation_statuses=local_allowed_validation_statuses,
+            root=local_store_root,
+        )
+        prepared = {
+            symbol: _prepare_price_frame_for_backtrader(df)
+            for symbol, df in loaded.items()
+        }
+        if not prepared:
+            raise ValueError("local universe load returned no frames")
+        earliest = min(
+            pd.Timestamp(df.index.min())
+            for df in prepared.values()
+            if not df.empty
+        )
+        slice_start = earliest.strftime("%Y-%m-%d")
+        return prepared, slice_start
+
+    if data_dfs is None:
+        if universe_symbols is None:
+            raise ValueError("universe_symbols is required when data_dfs is None")
+
+        def evaluate_training_window(window, weights):
+            window_dfs, slice_start = _load_local_window(
+                universe_symbols,
+                window["train_start"],
+                window["train_end"],
+            )
+            return evaluate_weight_tuple(
+                window_dfs,
+                slice_start,
+                window["train_end"],
+                weights,
+                momentum_definition=momentum_definition,
+                evaluation_start=window["train_start"],
+                evaluation_end=window["train_end"],
+            )
+
+        def evaluate_validation_window(window, weights):
+            window_dfs, slice_start = _load_local_window(
+                universe_symbols,
+                window["validation_start"],
+                window["validation_end"],
+            )
+            metrics = evaluate_weight_tuple(
+                window_dfs,
+                slice_start,
+                window["validation_end"],
+                weights,
+                momentum_definition=momentum_definition,
+                evaluation_start=window["validation_start"],
+                evaluation_end=window["validation_end"],
+            )
+            metrics = metrics | _build_validation_participation_metrics(
+                data_dfs=window_dfs,
+                universe_symbols=universe_symbols,
+                validation_start=window["validation_start"],
+                validation_end=window["validation_end"],
+            )
+            return metrics
+
+        def evaluate_baseline_window(window):
+            window_dfs, slice_start = _load_local_window(
+                universe_symbols,
+                window["validation_start"],
+                window["validation_end"],
+            )
+            return evaluate_weight_tuple(
+                window_dfs,
+                slice_start,
+                window["validation_end"],
+                DEFAULT_BASELINE_WEIGHTS,
+                momentum_definition=momentum_definition,
+                evaluation_start=window["validation_start"],
+                evaluation_end=window["validation_end"],
+            )
+
+        def evaluate_one_shot_training_window(weights):
+            window_dfs, slice_start = _load_local_window(universe_symbols, start, end)
+            return evaluate_weight_tuple(
+                window_dfs,
+                slice_start,
+                end,
+                weights,
+                momentum_definition=momentum_definition,
+                evaluation_start=start,
+                evaluation_end=end,
+            )
+
+        def evaluate_one_shot_validation_window(window, weights):
+            window_dfs, slice_start = _load_local_window(
+                universe_symbols,
+                window["validation_start"],
+                window["validation_end"],
+            )
+            return evaluate_weight_tuple(
+                window_dfs,
+                slice_start,
+                window["validation_end"],
+                weights,
+                momentum_definition=momentum_definition,
+                evaluation_start=window["validation_start"],
+                evaluation_end=window["validation_end"],
+            )
+
+    else:
+        def evaluate_training_window(window, weights):
+            return _evaluate_weight_tuple_with_momentum(
+                data_dfs,
+                window["train_start"],
+                window["train_end"],
+                weights,
+                momentum_definition,
+            )
+
+        def evaluate_validation_window(window, weights):
+            return _evaluate_weight_tuple_with_momentum(
+                data_dfs,
+                window["validation_start"],
+                window["validation_end"],
+                weights,
+                momentum_definition,
+            ) | _build_validation_participation_metrics(
+                data_dfs=data_dfs,
+                universe_symbols=universe_symbols,
+                validation_start=window["validation_start"],
+                validation_end=window["validation_end"],
+            )
+
+        def evaluate_baseline_window(window):
+            return _evaluate_weight_tuple_with_momentum(
+                data_dfs,
+                window["validation_start"],
+                window["validation_end"],
+                DEFAULT_BASELINE_WEIGHTS,
+                momentum_definition,
+            )
+
+        def evaluate_one_shot_training_window(weights):
+            return _evaluate_weight_tuple_with_momentum(
+                data_dfs,
+                start,
+                end,
+                weights,
+                momentum_definition,
+            )
+
+        def evaluate_one_shot_validation_window(window, weights):
+            return _evaluate_weight_tuple_with_momentum(
+                data_dfs,
+                window["validation_start"],
+                window["validation_end"],
+                weights,
+                momentum_definition,
+            )
+
     result = run_walk_forward_experiment(
         start=start,
         end=end,
@@ -339,47 +604,11 @@ def run_walk_forward_optimization(
         validation_months=validation_months,
         step_months=step_months,
         weight_grid=DEFAULT_WEIGHT_GRID,
-        evaluate_training_window=lambda window, weights: _evaluate_weight_tuple_with_momentum(
-            data_dfs,
-            window["train_start"],
-            window["train_end"],
-            weights,
-            momentum_definition,
-        ),
-        evaluate_validation_window=lambda window, weights: _evaluate_weight_tuple_with_momentum(
-            data_dfs,
-            window["validation_start"],
-            window["validation_end"],
-            weights,
-            momentum_definition,
-        )
-        | _build_validation_participation_metrics(
-            data_dfs=data_dfs,
-            universe_symbols=universe_symbols,
-            validation_start=window["validation_start"],
-            validation_end=window["validation_end"],
-        ),
-        evaluate_baseline_window=lambda window: _evaluate_weight_tuple_with_momentum(
-            data_dfs,
-            window["validation_start"],
-            window["validation_end"],
-            DEFAULT_BASELINE_WEIGHTS,
-            momentum_definition,
-        ),
-        evaluate_one_shot_training_window=lambda weights: _evaluate_weight_tuple_with_momentum(
-            data_dfs,
-            start,
-            end,
-            weights,
-            momentum_definition,
-        ),
-        evaluate_one_shot_validation_window=lambda window, weights: _evaluate_weight_tuple_with_momentum(
-            data_dfs,
-            window["validation_start"],
-            window["validation_end"],
-            weights,
-            momentum_definition,
-        ),
+        evaluate_training_window=evaluate_training_window,
+        evaluate_validation_window=evaluate_validation_window,
+        evaluate_baseline_window=evaluate_baseline_window,
+        evaluate_one_shot_training_window=evaluate_one_shot_training_window,
+        evaluate_one_shot_validation_window=evaluate_one_shot_validation_window,
         evaluate_benchmark_windows=benchmark_evaluators,
         artifact_dir=None,
         momentum_definition=momentum_definition,
@@ -390,7 +619,9 @@ def run_walk_forward_optimization(
     metadata = build_walk_forward_metadata(
         result.get("metadata", {}),
         universe_name=universe_name,
-        universe_symbols=universe_symbols if universe_symbols is not None else list(data_dfs.keys()),
+        universe_symbols=universe_symbols
+        if universe_symbols is not None
+        else list(data_dfs.keys()) if data_dfs is not None else [],
     )
     result["metadata"] = metadata
 
@@ -447,6 +678,29 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Named universe from src.data.universe to load (defaults to Topix-10)",
     )
+    parser.add_argument(
+        "--use-local-store",
+        action="store_true",
+        help="Load data from validated local research store instead of fetching from network/cache",
+    )
+    parser.add_argument(
+        "--local-store-root",
+        type=Path,
+        default=None,
+        help="Root directory for the local research store (defaults to current directory)",
+    )
+    parser.add_argument(
+        "--local-warmup-bars",
+        type=int,
+        default=None,
+        help="Warmup bar count to load before each window start when using --use-local-store",
+    )
+    parser.add_argument(
+        "--momentum-definition",
+        choices=sorted(SUPPORTED_MOMENTUM_DEFINITIONS),
+        default="90d",
+        help="Research-only momentum definition for walk-forward optimization",
+    )
     parser.add_argument("--train-months", type=int, default=DEFAULT_TRAIN_MONTHS, help="Training window length in months")
     parser.add_argument(
         "--validation-months",
@@ -471,22 +725,30 @@ def main(argv: list[str] | None = None) -> int:
     else:
         symbols = get_topix_top_10()
         universe_name = "topix_top_10"
-    print(
-        "Fetching historical data for walk-forward optimization "
-        f"({args.start} -> {args.end})..."
-    )
+    data_dfs = None
+    benchmark_data_dfs: dict[str, pd.DataFrame] = {}
 
-    try:
-        data_dfs = fetch_universe(symbols, args.start, args.end)
-    except Exception as exc:
-        print(f"Data fetch failed: {exc}")
-        return 1
+    if args.use_local_store:
+        print(
+            "Loading validated local data for walk-forward optimization "
+            f"({args.start} -> {args.end})..."
+        )
+    else:
+        print(
+            "Fetching historical data for walk-forward optimization "
+            f"({args.start} -> {args.end})..."
+        )
 
-    benchmark_data_dfs = {}
-    try:
-        benchmark_data_dfs = fetch_universe(list(DEFAULT_BENCHMARK_SYMBOLS.values()), args.start, args.end)
-    except Exception as exc:
-        print(f"Benchmark data fetch skipped: {exc}")
+        try:
+            data_dfs = fetch_universe(symbols, args.start, args.end)
+        except Exception as exc:
+            print(f"Data fetch failed: {exc}")
+            return 1
+
+        try:
+            benchmark_data_dfs = fetch_universe(list(DEFAULT_BENCHMARK_SYMBOLS.values()), args.start, args.end)
+        except Exception as exc:
+            print(f"Benchmark data fetch skipped: {exc}")
 
     try:
         run_walk_forward_optimization(
@@ -504,7 +766,19 @@ def main(argv: list[str] | None = None) -> int:
                 for benchmark_name, symbol in DEFAULT_BENCHMARK_SYMBOLS.items()
                 if symbol in benchmark_data_dfs
             },
+            momentum_definition=args.momentum_definition,
+            local_store_root=args.local_store_root,
+            local_warmup_bars=args.local_warmup_bars,
         )
+    except local_store.LocalDataSyncRequiredError as exc:
+        print(f"Local data sync required: {exc}")
+        print(
+            "Sync local data via: "
+            f"python -m src.main --sync-local --universe-name {universe_name} "
+            f"--start {args.start} --end {args.end} "
+            f"--local-store-root {args.local_store_root or '.'}"
+        )
+        return 1
     except Exception as exc:
         print(f"Walk-forward optimization failed: {exc}")
         return 1

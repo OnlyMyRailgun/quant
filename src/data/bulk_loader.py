@@ -6,8 +6,18 @@ from src.research.data_validation import validate_price_frame
 
 CACHE_DIR = Path(".data_cache")
 
+def _sanitize_symbol(symbol: str) -> str:
+    if not symbol or "/" in symbol or "\\" in symbol:
+        raise ValueError("symbol contains invalid path characters")
+    candidate = Path(symbol)
+    if candidate.name != symbol or symbol in {".", ".."}:
+        raise ValueError("symbol contains invalid path segments")
+    return symbol
+
+
 def _get_cache_path(symbol: str) -> Path:
-    return CACHE_DIR / f"{symbol}.parquet"
+    sanitized = _sanitize_symbol(symbol)
+    return CACHE_DIR / f"{sanitized}.parquet"
 
 
 def _normalize_index(df: pd.DataFrame) -> pd.DataFrame:

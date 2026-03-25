@@ -1,10 +1,12 @@
 import argparse
 from dataclasses import asdict
+from pathlib import Path
 import sys
 from typing import TextIO
 import backtrader as bt
 import pandas as pd
 from src.data.bulk_loader import fetch_universe
+from src.data import local_store
 from src.data.universe import (
     format_unknown_universe_message,
     get_topix_top_10,
@@ -176,6 +178,24 @@ def render_backtest_results(
     print("=" * 40 + "\n", file=output)
 
 
+def sync_named_universe(
+    universe_name: str,
+    start_date: str,
+    end_date: str,
+    root: Path | str | None = None,
+    fetcher: local_store.Fetcher | None = None,
+) -> dict[str, local_store.ManifestRecord]:
+    """Minimal entry point for syncing a named universe into the local research store."""
+    symbols = get_universe(universe_name)
+    return local_store.sync_universe_history(
+        symbols,
+        start_date,
+        end_date,
+        root=root,
+        fetcher=fetcher,
+    )
+
+
 def _build_screening_decisions_frame(candidate_symbols, by_symbol):
     rows = []
     for symbol in candidate_symbols:
@@ -193,6 +213,17 @@ def _build_screening_decisions_frame(candidate_symbols, by_symbol):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Quant Backtest and Plot Results")
+    parser.add_argument(
+        "--sync-local",
+        action="store_true",
+        help="Sync selected ticker/universe into the local research store and exit",
+    )
+    parser.add_argument(
+        "--local-store-root",
+        type=str,
+        default=None,
+        help="Root directory for the local research store (defaults to current directory)",
+    )
     parser.add_argument("--ticker", type=str, default=None, help="Specific ticker symbol (e.g. 7203.T)")
     parser.add_argument("--universe", action="store_true", help="Run on the full Top 10 TOPIX Universe")
     parser.add_argument(
@@ -230,6 +261,16 @@ def main():
     else:
         # Default behavior limits output for testing
         symbols = ["7203.T", "6758.T", "8306.T"]
+
+    if args.sync_local:
+        local_store.sync_universe_history(
+            symbols,
+            args.start,
+            args.end,
+            root=args.local_store_root,
+        )
+        print(f"Synced {len(symbols)} symbols into local store at {args.local_store_root or '.'}.")
+        return
 
     print(f"Fetching data for {len(symbols)} symbols from {args.start} to {args.end}...")
     try:
