@@ -53,7 +53,7 @@ def test_build_walk_forward_windows_returns_empty_when_range_is_too_short():
     assert windows == []
 
 
-def test_select_best_weights_picks_highest_scoring_weight_tuple():
+def test_select_best_weights_picks_highest_sharpe_weight_tuple():
     leaderboard = select_best_weights(
         weight_grid=[(0.0, 0.0, 1.0), (1.0, 0.5, 0.0), (1.0, 1.0, 1.0)],
         evaluate=lambda weights: {
@@ -63,8 +63,38 @@ def test_select_best_weights_picks_highest_scoring_weight_tuple():
         }[weights],
     )
 
-    assert leaderboard["best"]["weights"] == {"mom": 1.0, "vol": 0.5, "rev": 0.0}
-    assert leaderboard["rows"][0]["return_pct"] == 4.0
+    assert leaderboard["best"]["weights"] == {"mom": 1.0, "vol": 1.0, "rev": 1.0}
+    assert leaderboard["rows"][0]["sharpe"] == 0.5
+
+
+def test_select_best_weights_prefers_higher_sharpe_over_higher_return():
+    leaderboard = select_best_weights(
+        weight_grid=[(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        evaluate=lambda weights: {
+            (1.0, 0.0, 0.0): {"return_pct": 6.0, "sharpe": 0.2},
+            (0.0, 1.0, 0.0): {"return_pct": 4.0, "sharpe": 0.6},
+        }[weights],
+    )
+
+    assert leaderboard["best"]["weights"] == {"mom": 0.0, "vol": 1.0, "rev": 0.0}
+    assert leaderboard["rows"][0]["sharpe"] == 0.6
+
+
+def test_select_best_weights_uses_return_pct_when_sharpe_is_tied():
+    leaderboard = select_best_weights(
+        weight_grid=[(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        evaluate=lambda weights: {
+            (1.0, 0.0, 0.0): {"return_pct": 5.0, "sharpe": 0.5},
+            (0.0, 1.0, 0.0): {"return_pct": 3.0, "sharpe": 0.5},
+        }[weights],
+    )
+
+    assert leaderboard["best"]["weights"] == {"mom": 1.0, "vol": 0.0, "rev": 0.0}
+    assert leaderboard["rows"][0]["return_pct"] == 5.0
+
+
+def test_default_weight_grid_excludes_all_zero_tuple():
+    assert (0.0, 0.0, 0.0) not in optimize.DEFAULT_WEIGHT_GRID
 
 
 def test_write_walk_forward_run_persists_weights_and_summary(tmp_path: Path):

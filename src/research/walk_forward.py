@@ -246,8 +246,8 @@ def select_best_weights(
 
     rows.sort(
         key=lambda row: (
-            row["return_pct"],
             row["sharpe"],
+            row["return_pct"],
             row["weights"]["mom"],
             row["weights"]["vol"],
             row["weights"]["rev"],
