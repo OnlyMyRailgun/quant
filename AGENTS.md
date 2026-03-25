@@ -12,6 +12,9 @@ Human collaborators are not expected to follow this workflow.
 - If unfinished worktrees exist, the agent MUST either:
   - finish, merge, or discard them first, or
   - explicitly record the blocker and get user approval before opening another long-lived worktree.
+- Spec and plan documents MUST be committed to `main` before implementation begins.
+- The implementation worktree MUST be branched from the commit that already includes the approved spec and plan.
+- Spec or plan documents MUST NOT be left as uncommitted files in the main workspace.
 - Any non-temporary development MUST happen in a `codex/*` worktree, not directly in the main workspace.
 - Temporary one-off inspection or debugging commands may run outside a worktree if they do not create long-lived code changes.
 
