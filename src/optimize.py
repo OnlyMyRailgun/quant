@@ -30,7 +30,11 @@ from src.strategies.multi_factor import UniversalMultiFactor
 
 STARTING_CASH = 1_000_000.0
 DEFAULT_BASELINE_WEIGHTS = (1.0, 1.0, 1.0)
-DEFAULT_WEIGHT_GRID = list(product((0.0, 0.5, 1.0), repeat=3))
+DEFAULT_WEIGHT_GRID = [
+    weights
+    for weights in product((0.0, 0.5, 1.0), repeat=3)
+    if weights != (0.0, 0.0, 0.0)
+]
 DEFAULT_OPTIMIZE_START = "2021-01-01"
 DEFAULT_OPTIMIZE_END = "2024-01-01"
 DEFAULT_TRAIN_MONTHS = 12
