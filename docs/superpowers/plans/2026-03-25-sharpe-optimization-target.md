@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Change walk-forward weight selection to Sharpe-first ordering, remove the all-zero weight tuple, and verify the effect on `12_1 mom-only` and `vol-only` across `topix_top_10`, `japan_large_30`, and `japan_broad_50`.
+**Goal:** Change walk-forward weight selection to Sharpe-first ordering, remove the all-zero weight tuple, and verify the effect on `12_1 + vol` across `topix_top_10`, `japan_large_30`, and `japan_broad_50`.
 
 **Architecture:** Keep the slice narrow by changing only the weight-selection ranking logic in the walk-forward engine plus the default optimization grid. Preserve approved-params and paper-trading behavior, and record before/after research results by comparing new Sharpe-first runs against the existing return-first artifacts rather than rerunning the baseline.
 
@@ -193,15 +193,16 @@ Only commit this step if Task 1/2 did not already include all test updates.
 
 - [ ] **Step 1: Collect the existing return-first baseline artifact paths**
 
-Use the already-generated local-store research results for:
+Use the existing return-first setup as the before baseline for:
 
-- `12_1 mom-only`
-- `vol-only`
+- `12_1 + vol`
 - `topix_top_10`
 - `japan_large_30`
 - `japan_broad_50`
 
-Do not rerun the return-first baseline if the artifacts already exist.
+If matching baseline artifacts already exist, reuse them.
+If they do not exist for this exact experiment shape, run the return-first baseline once
+and record those artifact paths before the Sharpe-first rerun.
 
 - [ ] **Step 2: Run Sharpe-first comparison experiments**
 
@@ -213,8 +214,7 @@ For each universe:
 
 Run:
 
-- `12_1 mom-only`
-- `vol-only`
+- `12_1 + vol`
 
 using the local Parquet research store and the longer synced history.
 
@@ -227,13 +227,13 @@ Create `docs/2026-03-25-sharpe-optimization-target-results.md` and record at min
 - walk-forward return before/after
 - average validation hit rate before/after
 - average train/validation gap before/after
-- short conclusion per universe/candidate
+- short conclusion per universe
 
 - [ ] **Step 4: Verify acceptance criteria**
 
 Check that:
 
-- `12_1 mom-only` and `vol-only` both still have positive walk-forward return
+- `12_1 + vol` still has positive walk-forward return
 - average train/validation gap is narrower than the return-first baseline
 
 If a candidate fails the criteria, record that explicitly in the results note instead of claiming success.

@@ -12,8 +12,7 @@ This slice is intentionally narrow:
 - change only the walk-forward weight-selection target
 - remove the all-zero weight tuple from the optimization grid
 - compare the effect on the current best research candidates:
-  - `12_1 mom-only`
-  - `vol-only`
+  - `12_1 + vol`
 
 ## Why This Slice
 
@@ -135,10 +134,9 @@ Primary verification targets:
 - more stable validation behavior across windows
 - reasonable retention of walk-forward return
 
-For this slice, compare at least:
+For this slice, compare:
 
-- `12_1 mom-only`
-- `vol-only`
+- `12_1 + vol`
 
 using the local Parquet research store and the longer synced history now available.
 
@@ -170,8 +168,7 @@ Add tests proving:
 
 Run before/after comparisons for:
 
-- `12_1 mom-only`
-- `vol-only`
+- `12_1 + vol`
 
 Record at minimum:
 
@@ -190,7 +187,7 @@ This slice is complete when:
 1. walk-forward weight ranking is Sharpe-first
 2. the all-zero tuple is removed from the default grid
 3. existing tests pass with updated expectations
-4. longer-history research reruns for `12_1 mom-only` and `vol-only` show narrower
+4. longer-history research reruns for `12_1 + vol` show narrower
    average train/validation gap compared to the `return_pct`-first baseline, with
    walk-forward return remaining positive
 5. approved params and paper-trading logic remain unchanged
@@ -199,6 +196,6 @@ This slice is complete when:
 
 After this slice, likely next decisions are:
 
-- whether `vol-only` remains the strongest standalone candidate under Sharpe-first selection
-- whether `12_1 + vol` is worth revisiting under the new optimizer objective
+- whether `12_1 + vol` is still structurally weaker than the single-factor variants
+- whether a narrower candidate family around `12_1 + vol` is worth exploring
 - whether approval governance should later consume a more risk-aware run-selection signal
