@@ -415,6 +415,10 @@ def run_walk_forward_optimization(
         }
 
     def _resolve_default_warmup_bars() -> int:
+        if momentum_definition == "12_1":
+            # 252 lookback + 21 skip, with a small buffer for indicator edges.
+            return 252 + 21 + 5
+
         params = getattr(UniversalMultiFactor, "params", None)
         lookbacks = []
         for field in ("lookback_mom", "lookback_vol", "lookback_rev"):

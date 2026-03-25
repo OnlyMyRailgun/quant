@@ -1343,6 +1343,59 @@ def test_local_optimize_insufficient_warmup_raises_sync_required(monkeypatch, tm
     assert "sync" in message
 
 
+def test_local_optimize_requests_12_1_specific_warmup(monkeypatch, tmp_path: Path):
+    requested_warmups: list[int] = []
+
+    def fake_load_local_universe(
+        symbols,
+        start_date,
+        end_date,
+        warmup=0,
+        strict_warmup=False,
+        allowed_validation_statuses=("ok",),
+        root=None,
+    ):
+        del start_date, end_date, strict_warmup, allowed_validation_statuses, root
+        requested_warmups.append(int(warmup))
+        frame = pd.DataFrame(
+            {"Date": pd.date_range("2020-01-01", periods=400, freq="B"), "Close": range(400)},
+        )
+        return {symbol: frame.copy() for symbol in symbols}
+
+    def fake_eval(
+        data_dfs,
+        start,
+        end,
+        weights,
+        momentum_definition="90d",
+        evaluation_start=None,
+        evaluation_end=None,
+    ):
+        del data_dfs, start, end, weights, evaluation_start, evaluation_end
+        assert momentum_definition == "12_1"
+        return {"return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0, "symbol_returns": []}
+
+    monkeypatch.setattr(local_store, "load_local_universe", fake_load_local_universe)
+    monkeypatch.setattr(optimize, "evaluate_weight_tuple", fake_eval)
+
+    optimize.run_walk_forward_optimization(
+        data_dfs=None,
+        start="2024-01-01",
+        end="2024-05-31",
+        train_months=2,
+        validation_months=1,
+        step_months=1,
+        artifact_dir=None,
+        universe_name="local_test",
+        universe_symbols=["AAA.T"],
+        local_store_root=tmp_path,
+        momentum_definition="12_1",
+    )
+
+    assert requested_warmups
+    assert min(requested_warmups) >= 273
+
+
 def test_missing_local_validated_coverage_raises_clear_sync_required_error(
     tmp_path: Path,
 ):
