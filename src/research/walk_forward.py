@@ -271,6 +271,7 @@ def run_walk_forward_experiment(
     evaluate_one_shot_validation_window=None,
     evaluate_benchmark_windows=None,
     artifact_dir=None,
+    momentum_definition: str = "90d",
 ) -> dict[str, object]:
     windows = build_walk_forward_windows(
         start=start,
@@ -406,6 +407,7 @@ def run_walk_forward_experiment(
         "train_months": train_months,
         "validation_months": validation_months,
         "step_months": step_months,
+        "momentum_definition": momentum_definition,
     }
     if one_shot_best_weights is not None:
         metadata["one_shot_weights"] = one_shot_best_weights

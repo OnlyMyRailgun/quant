@@ -3,6 +3,7 @@ from pathlib import Path
 
 import backtrader as bt
 import pandas as pd
+import pytest
 
 import src.optimize as optimize
 from src.research.walk_forward import (
@@ -131,6 +132,128 @@ def test_evaluate_weight_tuple_returns_symbol_diagnostics_from_real_backtest_pat
         {"symbol": "AAA.T", "return_pct": 12.0},
         {"symbol": "BBB.T", "return_pct": -4.0},
     ]
+
+
+def test_evaluate_weight_tuple_handles_short_windows_without_runonce_crash():
+    index = pd.bdate_range("2022-01-03", periods=59)
+    data_dfs = {
+        f"S{i}.T": pd.DataFrame(
+            {"Close": [100.0 + i + j * 0.1 for j in range(len(index))]},
+            index=index,
+        )
+        for i in range(10)
+    }
+
+    metrics = optimize.evaluate_weight_tuple(
+        data_dfs=data_dfs,
+        start="2022-01-03",
+        end="2022-03-31",
+        weights=(1.0, 1.0, 1.0),
+    )
+
+    assert metrics["return_pct"] == 0.0
+    assert metrics["symbol_returns"] == []
+
+
+def test_evaluate_weight_tuple_uses_prior_history_to_warm_up_short_evaluation_windows():
+    index = pd.bdate_range("2021-09-01", "2022-03-31")
+    data_dfs = {
+        f"S{i}.T": pd.DataFrame(
+            {"Close": [100.0 + i + j * 0.1 for j in range(len(index))]},
+            index=index,
+        )
+        for i in range(10)
+    }
+
+    metrics = optimize.evaluate_weight_tuple(
+        data_dfs=data_dfs,
+        start="2022-01-01",
+        end="2022-03-31",
+        weights=(1.0, 1.0, 1.0),
+    )
+
+    assert metrics["return_pct"] > 0.0
+    assert metrics["symbol_returns"]
+
+
+def test_evaluate_weight_tuple_uses_research_momentum_definition_in_execution(monkeypatch):
+    class RankingStrategy(bt.Strategy):
+        params = dict(
+            weight_mom=1.0,
+            weight_vol=0.0,
+            weight_rev=0.0,
+            top_n=1,
+        )
+
+        def __init__(self):
+            self._ordered = False
+
+        def _collect_visible_history(self):
+            history = {}
+            for data in self.datas:
+                closes = list(data.close.get(size=len(data)))
+                datetimes = [
+                    bt.num2date(value).replace(tzinfo=None)
+                    for value in data.datetime.get(size=len(data))
+                ]
+                history[data._name] = pd.DataFrame(
+                    {"Close": closes},
+                    index=pd.DatetimeIndex(datetimes),
+                )
+            return history
+
+        def _score_visible_universe(self):
+            return optimize.score_universe(
+                self._collect_visible_history(),
+                top_n=self.p.top_n,
+                weight_mom=self.p.weight_mom,
+                weight_vol=self.p.weight_vol,
+                weight_rev=self.p.weight_rev,
+            )
+
+        def next(self):
+            if self._ordered or len(self) < 252:
+                return
+            ranked = self._score_visible_universe()
+            if ranked.empty:
+                return
+            top_symbol = ranked.iloc[0]["symbol"]
+            for data in self.datas:
+                target = 0.95 if data._name == top_symbol else 0.0
+                self.order_target_percent(data=data, target=target)
+            self._ordered = True
+
+    monkeypatch.setattr(optimize, "UniversalMultiFactor", RankingStrategy)
+
+    index = pd.bdate_range("2021-01-01", periods=320)
+    data_dfs = {
+        "A.T": pd.DataFrame(
+            {"Close": [100.0] * 200 + [100.0 + i * 1.2 for i in range(120)]},
+            index=index,
+        ),
+        "B.T": pd.DataFrame(
+            {"Close": [100.0 + i * 0.6 for i in range(250)] + [250.0 - i * 0.2 for i in range(70)]},
+            index=index,
+        ),
+        "C.T": pd.DataFrame({"Close": [100.0] * 320}, index=index),
+    }
+
+    metrics_90d = optimize.evaluate_weight_tuple(
+        data_dfs=data_dfs,
+        start="2021-01-01",
+        end=index[-1].strftime("%Y-%m-%d"),
+        weights=(1.0, 0.0, 0.0),
+        momentum_definition="90d",
+    )
+    metrics_12_1 = optimize.evaluate_weight_tuple(
+        data_dfs=data_dfs,
+        start="2021-01-01",
+        end=index[-1].strftime("%Y-%m-%d"),
+        weights=(1.0, 0.0, 0.0),
+        momentum_definition="12_1",
+    )
+
+    assert metrics_90d["return_pct"] > metrics_12_1["return_pct"]
 
 
 def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
@@ -980,3 +1103,139 @@ def test_optimize_main_continues_when_benchmark_fetch_fails(monkeypatch, capsys)
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "Benchmark data fetch skipped:" in output
+
+
+def test_run_walk_forward_experiment_records_momentum_definition_in_metadata():
+    result = run_walk_forward_experiment(
+        start="2021-01-01",
+        end="2021-12-31",
+        train_months=6,
+        validation_months=6,
+        step_months=6,
+        weight_grid=[(1.0, 0.0, 0.0)],
+        evaluate_training_window=lambda window, weights: {"return_pct": 1.0, "sharpe": 0.1},
+        evaluate_validation_window=lambda window, weights: {"return_pct": 1.1, "sharpe": 0.1},
+        evaluate_baseline_window=lambda window: {"return_pct": 0.9, "sharpe": 0.1},
+        momentum_definition="12_1",
+    )
+
+    assert result["metadata"]["momentum_definition"] == "12_1"
+
+
+def test_run_walk_forward_optimization_defaults_to_90d_momentum(monkeypatch):
+    captured = {}
+
+    def fake_run_walk_forward_experiment(**kwargs):
+        captured["kwargs"] = kwargs
+        return {
+            "weights": pd.DataFrame(),
+            "summary": {
+                "window_count": 0,
+                "baseline_return_pct": 0.0,
+                "walk_forward_return_pct": 0.0,
+            },
+            "metadata": {},
+        }
+
+    monkeypatch.setattr(optimize, "run_walk_forward_experiment", fake_run_walk_forward_experiment)
+
+    optimize.run_walk_forward_optimization(
+        data_dfs={},
+        start="2021-01-01",
+        end="2021-12-31",
+        artifact_dir=None,
+    )
+
+    assert captured["kwargs"]["momentum_definition"] == "90d"
+
+
+def test_run_walk_forward_optimization_accepts_12_1_momentum_override(monkeypatch):
+    captured = {}
+
+    def fake_evaluate_weight_tuple(data_dfs, start, end, weights, momentum_definition):
+        del data_dfs, start, end, weights
+        return {
+            "return_pct": 1.0,
+            "sharpe": 0.1,
+            "scores": pd.DataFrame(
+                [
+                    {
+                        "symbol": "AAA.T",
+                        "mom_raw": 12.0 if momentum_definition == "12_1" else 9.0,
+                    }
+                ]
+            ),
+        }
+
+    def fake_run_walk_forward_experiment(**kwargs):
+        captured["kwargs"] = kwargs
+        captured["validation_metrics"] = kwargs["evaluate_validation_window"](
+            {
+                "validation_start": "2021-07-01",
+                "validation_end": "2021-12-31",
+            },
+            (1.0, 0.0, 0.0),
+        )
+        return {
+            "weights": pd.DataFrame(),
+            "summary": {
+                "window_count": 1,
+                "baseline_return_pct": 0.0,
+                "walk_forward_return_pct": 1.0,
+            },
+            "metadata": {},
+        }
+
+    monkeypatch.setattr(optimize, "evaluate_weight_tuple", fake_evaluate_weight_tuple)
+    monkeypatch.setattr(optimize, "run_walk_forward_experiment", fake_run_walk_forward_experiment)
+
+    optimize.run_walk_forward_optimization(
+        data_dfs={"AAA.T": pd.DataFrame({"Close": [100.0, 101.0]})},
+        start="2021-01-01",
+        end="2021-12-31",
+        artifact_dir=None,
+        momentum_definition="12_1",
+    )
+
+    assert captured["kwargs"]["momentum_definition"] == "12_1"
+    assert captured["validation_metrics"]["scores"]["mom_raw"].tolist() == [12.0]
+
+
+def test_run_walk_forward_optimization_rejects_unknown_momentum_definition():
+    with pytest.raises(ValueError, match="Unsupported momentum_definition"):
+        optimize.run_walk_forward_optimization(
+            data_dfs={},
+            start="2021-01-01",
+            end="2021-12-31",
+            artifact_dir=None,
+            momentum_definition="bad_value",
+        )
+
+
+def test_run_walk_forward_optimization_persists_momentum_definition_metadata(monkeypatch, tmp_path):
+    def fake_run_walk_forward_experiment(**kwargs):
+        return {
+            "weights": pd.DataFrame(),
+            "summary": {
+                "window_count": 0,
+                "baseline_return_pct": 0.0,
+                "walk_forward_return_pct": 0.0,
+            },
+            "metadata": {
+                "momentum_definition": kwargs["momentum_definition"],
+            },
+        }
+
+    monkeypatch.setattr(optimize, "run_walk_forward_experiment", fake_run_walk_forward_experiment)
+
+    result = optimize.run_walk_forward_optimization(
+        data_dfs={},
+        start="2021-01-01",
+        end="2021-12-31",
+        artifact_dir=tmp_path,
+        momentum_definition="12_1",
+    )
+
+    assert result["metadata"]["momentum_definition"] == "12_1"
+    metadata = json.loads(result["artifacts"]["metadata"].read_text(encoding="utf-8"))
+    assert metadata["momentum_definition"] == "12_1"

@@ -16,7 +16,14 @@ from src.data.universe import (
 )
 from src.engine.commission import JapanStockCommission
 from src.research.artifacts import DEFAULT_ARTIFACT_DIR, build_walk_forward_metadata, write_walk_forward_run
+from src.research.research_scoring import score_research_universe
 from src.research.walk_forward import run_walk_forward_experiment
+from src.scoring.multi_factor import (
+    DEFAULT_LOOKBACK_MOM,
+    DEFAULT_LOOKBACK_REV,
+    DEFAULT_LOOKBACK_VOL,
+    score_universe,
+)
 from src.strategies.multi_factor import UniversalMultiFactor
 
 
@@ -32,6 +39,7 @@ DEFAULT_BENCHMARK_SYMBOLS = {
     "topx": "1306.T",
     "n225": "1321.T",
 }
+SUPPORTED_MOMENTUM_DEFINITIONS = {"90d", "12_1"}
 
 
 class SymbolReturnAnalyzer(bt.Analyzer):
@@ -81,13 +89,26 @@ def _slice_window_data(
     data_dfs: dict[str, pd.DataFrame],
     start: str,
     end: str,
+    warmup_bars: int = 0,
 ) -> dict[str, pd.DataFrame]:
     window_dfs: dict[str, pd.DataFrame] = {}
+    start_ts = pd.Timestamp(start)
     for symbol, df in data_dfs.items():
         try:
-            window_df = df.loc[start:end]
+            up_to_end_df = df.loc[:end]
         except KeyError:
             continue
+
+        if up_to_end_df.empty:
+            continue
+
+        if warmup_bars > 0:
+            pre_window_df = up_to_end_df[up_to_end_df.index < start_ts].tail(warmup_bars)
+            in_window_df = up_to_end_df[up_to_end_df.index >= start_ts]
+            window_df = pd.concat([pre_window_df, in_window_df])
+            window_df = window_df[~window_df.index.duplicated(keep="last")].sort_index()
+        else:
+            window_df = up_to_end_df.loc[start:end]
 
         if not window_df.empty:
             window_dfs[symbol] = window_df
@@ -129,21 +150,102 @@ def _build_validation_participation_metrics(
     }
 
 
+def _evaluate_weight_tuple_with_momentum(
+    data_dfs: dict[str, pd.DataFrame],
+    start: str,
+    end: str,
+    weights: tuple[float, float, float],
+    momentum_definition: str,
+) -> dict[str, object]:
+    if momentum_definition != "90d":
+        return evaluate_weight_tuple(
+            data_dfs,
+            start,
+            end,
+            weights,
+            momentum_definition=momentum_definition,
+        )
+
+    try:
+        return evaluate_weight_tuple(
+            data_dfs,
+            start,
+            end,
+            weights,
+            momentum_definition=momentum_definition,
+        )
+    except TypeError as exc:
+        if "momentum_definition" not in str(exc):
+            raise
+        return evaluate_weight_tuple(data_dfs, start, end, weights)
+
+
+def _build_execution_strategy_class(momentum_definition: str):
+    if momentum_definition == "90d":
+        return UniversalMultiFactor
+
+    class ResearchExecutionStrategy(UniversalMultiFactor):
+        def _score_visible_universe(self) -> pd.DataFrame:
+            return score_research_universe(
+                self._collect_visible_history(),
+                top_n=self.p.top_n,
+                weight_mom=self.p.weight_mom,
+                weight_vol=self.p.weight_vol,
+                weight_rev=self.p.weight_rev,
+                momentum_definition=momentum_definition,
+            )
+
+    return ResearchExecutionStrategy
+
+
 def evaluate_weight_tuple(
     data_dfs: dict[str, pd.DataFrame],
     start: str,
     end: str,
     weights: tuple[float, float, float],
+    momentum_definition: str = "90d",
 ) -> dict[str, float]:
-    window_dfs = _slice_window_data(data_dfs, start, end)
-    if not window_dfs:
-        return {"return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0}
+    if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
+        raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
 
-    suppress_output(UniversalMultiFactor)
+    warmup_bars = max(DEFAULT_LOOKBACK_MOM, DEFAULT_LOOKBACK_VOL, DEFAULT_LOOKBACK_REV)
+    window_dfs = _slice_window_data(data_dfs, start, end, warmup_bars=warmup_bars)
+    if not window_dfs:
+        empty_scores = score_universe(
+            {},
+            weight_mom=weights[0],
+            weight_vol=weights[1],
+            weight_rev=weights[2],
+        )
+        return {
+            "return_pct": 0.0,
+            "sharpe": 0.0,
+            "drawdown": 0.0,
+            "scores": empty_scores,
+        }
+
+    if momentum_definition == "12_1":
+        scores = score_research_universe(
+            window_dfs,
+            weight_mom=weights[0],
+            weight_vol=weights[1],
+            weight_rev=weights[2],
+            momentum_definition=momentum_definition,
+        )
+    else:
+        scores = score_universe(
+            window_dfs,
+            weight_mom=weights[0],
+            weight_vol=weights[1],
+            weight_rev=weights[2],
+        )
+
+    strategy_class = _build_execution_strategy_class(momentum_definition)
+    suppress_output(strategy_class)
 
     cerebro = bt.Cerebro()
     cerebro.addstrategy(
-        UniversalMultiFactor,
+        strategy_class,
         weight_mom=weights[0],
         weight_vol=weights[1],
         weight_rev=weights[2],
@@ -160,7 +262,7 @@ def evaluate_weight_tuple(
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
     cerebro.addanalyzer(SymbolReturnAnalyzer, _name="symbol_returns")
 
-    strategy = cerebro.run()[0]
+    strategy = cerebro.run(runonce=False, preload=True)[0]
     returns = strategy.analyzers.returns.get_analysis()
     sharpe = strategy.analyzers.sharpe.get_analysis().get("sharperatio")
     drawdown = strategy.analyzers.drawdown.get_analysis().get("max", {}).get("drawdown", 0.0)
@@ -171,6 +273,7 @@ def evaluate_weight_tuple(
         "sharpe": round(sharpe if sharpe is not None else 0.0, 4),
         "drawdown": round(drawdown, 4),
         "symbol_returns": symbol_returns,
+        "scores": scores,
     }
 
 
@@ -211,7 +314,11 @@ def run_walk_forward_optimization(
     benchmark_data_dfs: dict[str, pd.DataFrame] | None = None,
     universe_name: str | None = None,
     universe_symbols: list[str] | None = None,
+    momentum_definition: str = "90d",
 ) -> dict[str, object]:
+    if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
+        raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
+
     benchmark_evaluators = None
     if benchmark_data_dfs:
         benchmark_evaluators = {
@@ -232,17 +339,19 @@ def run_walk_forward_optimization(
         validation_months=validation_months,
         step_months=step_months,
         weight_grid=DEFAULT_WEIGHT_GRID,
-        evaluate_training_window=lambda window, weights: evaluate_weight_tuple(
+        evaluate_training_window=lambda window, weights: _evaluate_weight_tuple_with_momentum(
             data_dfs,
             window["train_start"],
             window["train_end"],
             weights,
+            momentum_definition,
         ),
-        evaluate_validation_window=lambda window, weights: evaluate_weight_tuple(
+        evaluate_validation_window=lambda window, weights: _evaluate_weight_tuple_with_momentum(
             data_dfs,
             window["validation_start"],
             window["validation_end"],
             weights,
+            momentum_definition,
         )
         | _build_validation_participation_metrics(
             data_dfs=data_dfs,
@@ -250,26 +359,30 @@ def run_walk_forward_optimization(
             validation_start=window["validation_start"],
             validation_end=window["validation_end"],
         ),
-        evaluate_baseline_window=lambda window: evaluate_weight_tuple(
+        evaluate_baseline_window=lambda window: _evaluate_weight_tuple_with_momentum(
             data_dfs,
             window["validation_start"],
             window["validation_end"],
             DEFAULT_BASELINE_WEIGHTS,
+            momentum_definition,
         ),
-        evaluate_one_shot_training_window=lambda weights: evaluate_weight_tuple(
+        evaluate_one_shot_training_window=lambda weights: _evaluate_weight_tuple_with_momentum(
             data_dfs,
             start,
             end,
             weights,
+            momentum_definition,
         ),
-        evaluate_one_shot_validation_window=lambda window, weights: evaluate_weight_tuple(
+        evaluate_one_shot_validation_window=lambda window, weights: _evaluate_weight_tuple_with_momentum(
             data_dfs,
             window["validation_start"],
             window["validation_end"],
             weights,
+            momentum_definition,
         ),
         evaluate_benchmark_windows=benchmark_evaluators,
         artifact_dir=None,
+        momentum_definition=momentum_definition,
     )
 
     weights = result["weights"]
