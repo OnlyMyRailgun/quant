@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from unittest.mock import Mock
 
 import json
 import numpy as np
@@ -218,3 +219,147 @@ def test_build_validation_summary_handles_tz_aware_dates():
 
     assert summary["missing_count"] == 1
     assert summary["missing_date_samples"][0] == missing.strftime("%Y-%m-%d")
+
+
+def _make_fetch_frame(index_dates: list[str] | pd.DatetimeIndex) -> pd.DataFrame:
+    idx = pd.to_datetime(index_dates)
+    return pd.DataFrame(
+        {"Close": [100.0 + i for i in range(len(idx))], "Volume": range(10, 10 + len(idx))},
+        index=idx,
+    )
+
+
+def test_sync_symbol_history_creates_raw_and_manifest(tmp_path):
+    fetched = _make_fetch_frame(pd.date_range("2024-01-01", periods=2, freq="B"))
+    fetcher = Mock(return_value=fetched)
+
+    record = local_store.sync_symbol_history(
+        "FOO",
+        "2024-01-01",
+        "2024-01-02",
+        root=tmp_path,
+        fetcher=fetcher,
+    )
+
+    raw_path = local_store.get_raw_path("FOO", root=tmp_path)
+    assert raw_path.exists()
+    stored = pd.read_parquet(raw_path)
+    assert len(stored) == len(fetched)
+    assert "Date" in stored.columns
+    assert record.validation_status == "ok"
+    assert record.validation_issues == []
+    records = local_store.read_manifest_records("FOO", root=tmp_path)
+    assert len(records) == 1
+    assert records[0].validation_status == "ok"
+    fetcher.assert_called_once_with("FOO", "2024-01-01", "2024-01-02")
+
+
+def test_sync_symbol_history_overlapping_range_replaces_overlap(tmp_path):
+    existing = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(
+                ["2024-01-01", "2024-01-02", "2024-01-03"]
+            ),
+            "Close": [10, 20, 30],
+            "Volume": [1, 2, 3],
+        }
+    )
+    local_store.write_raw_parquet("FOO", existing, root=tmp_path)
+
+    overlap = pd.DataFrame(
+        {
+            "Close": [200, 300, 400],
+            "Volume": [20, 30, 40],
+        },
+        index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]),
+    )
+    fetcher = Mock(return_value=overlap)
+
+    record = local_store.sync_symbol_history(
+        "FOO",
+        "2024-01-02",
+        "2024-01-04",
+        root=tmp_path,
+        fetcher=fetcher,
+    )
+
+    stored = pd.read_parquet(local_store.get_raw_path("FOO", root=tmp_path))
+    expected = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(
+                ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"]
+            ),
+            "Close": [10, 200, 300, 400],
+            "Volume": [1, 20, 30, 40],
+        }
+    )
+    pdt.assert_frame_equal(
+        stored.sort_values("Date").reset_index(drop=True),
+        expected.sort_values("Date").reset_index(drop=True),
+    )
+    assert record.validation_status == "ok"
+
+
+def test_sync_symbol_history_invalid_data_preserves_existing(tmp_path):
+    initial = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(["2024-01-01", "2024-01-02"]),
+            "Close": [10, 20],
+            "Volume": [1, 2],
+        }
+    )
+    local_store.write_raw_parquet("FOO", initial, root=tmp_path)
+
+    invalid = pd.DataFrame(
+        {"Close": [-5.0, -3.0], "Volume": [5, 6]},
+        index=pd.to_datetime(["2024-01-03", "2024-01-04"]),
+    )
+    fetcher = Mock(return_value=invalid)
+
+    record = local_store.sync_symbol_history(
+        "FOO",
+        "2024-01-03",
+        "2024-01-04",
+        root=tmp_path,
+        fetcher=fetcher,
+    )
+
+    stored = pd.read_parquet(local_store.get_raw_path("FOO", root=tmp_path))
+    expected_invalid = invalid.reset_index().rename(columns={"index": "Date"})
+    expected = pd.concat([initial, expected_invalid], ignore_index=True)
+    pdt.assert_frame_equal(
+        stored.sort_values("Date").reset_index(drop=True),
+        expected.sort_values("Date").reset_index(drop=True),
+    )
+    assert record.validation_status == "invalid"
+    assert record.validated_start is None
+    assert record.validated_end is None
+    assert "non_positive_close" in record.validation_issues
+    records = local_store.read_manifest_records("FOO", root=tmp_path)
+    assert len(records) == 1
+
+
+def test_sync_symbol_history_invalid_missing_data(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=50, freq="B")
+    missing_dates = {dates[5], dates[15], dates[25]}
+    provided = [dt for dt in dates if dt not in missing_dates]
+    fetched = pd.DataFrame(
+        {"Close": range(len(provided)), "Volume": range(len(provided))},
+        index=pd.to_datetime(provided),
+    )
+    fetcher = Mock(return_value=fetched)
+
+    record = local_store.sync_symbol_history(
+        "BAR",
+        dates[0],
+        dates[-1],
+        root=tmp_path,
+        fetcher=fetcher,
+    )
+
+    stored = pd.read_parquet(local_store.get_raw_path("BAR", root=tmp_path))
+    assert len(stored) == len(provided)
+    assert record.validation_status == "invalid"
+    assert record.validated_start is None
+    assert record.validated_end is None
+    assert "missing_data" in record.validation_issues

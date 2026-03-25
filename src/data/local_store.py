@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import warnings
 from dataclasses import dataclass
@@ -10,10 +11,13 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from src.data.yfinance_loader import fetch_daily_data
+
 
 RAW_SUBDIR = ".data_store/raw"
 CATALOG_SUBDIR = ".data_store/catalog"
 MANIFEST_FILENAME = "manifest.jsonl"
+Fetcher = Callable[[str, str, str], pd.DataFrame]
 
 
 def _resolve_root(root: Path | str | None) -> Path:
@@ -200,6 +204,17 @@ def merge_symbol_frames(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFra
     return concatenated.drop_duplicates(keep="last").reset_index(drop=True)
 
 
+def _prepare_fetched_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Ensure fetched frames expose a Date column derived from the index."""
+    normalized = frame.copy()
+    if normalized.empty:
+        normalized["Date"] = pd.Series(dtype="datetime64[ns]")
+        return normalized
+
+    normalized["Date"] = pd.to_datetime(normalized.index, errors="coerce")
+    return normalized.reset_index(drop=True)
+
+
 def build_validation_summary(frame: pd.DataFrame) -> dict[str, Any]:
     issues: list[str] = []
     if "Date" not in frame.columns or frame.empty:
@@ -305,3 +320,75 @@ def build_validation_summary(frame: pd.DataFrame) -> dict[str, Any]:
         "validated_start": validated_start,
         "validated_end": validated_end,
     }
+
+
+def _coerce_date_range(value: str | date) -> tuple[str, date]:
+    timestamp = pd.Timestamp(value)
+    return timestamp.strftime("%Y-%m-%d"), timestamp.date()
+
+
+def sync_symbol_history(
+    symbol: str,
+    start_date: str | date,
+    end_date: str | date,
+    root: Path | str | None = None,
+    fetcher: Fetcher | None = None,
+) -> ManifestRecord:
+    """Fetch the requested range, validate the merged history, and log a manifest entry."""
+    fetch_fn = fetcher or fetch_daily_data
+    root_path = _resolve_root(root)
+    _ensure_dirs(root_path)
+
+    raw_path = get_raw_path(symbol, root=root_path)
+    existing: pd.DataFrame = pd.DataFrame()
+    if raw_path.exists():
+        existing = pd.read_parquet(raw_path)
+
+    start_str, downloaded_start = _coerce_date_range(start_date)
+    end_str, downloaded_end = _coerce_date_range(end_date)
+
+    fetched_raw = fetch_fn(symbol, start_str, end_str)
+    prepared = _prepare_fetched_frame(fetched_raw)
+    merged = merge_symbol_frames(existing, prepared)
+    summary = build_validation_summary(merged)
+    is_valid = summary["validation_status"] != "invalid"
+
+    write_raw_parquet(symbol, merged, root=root_path)
+
+    record = ManifestRecord(
+        symbol=symbol,
+        downloaded_start=downloaded_start,
+        downloaded_end=downloaded_end,
+        validated_start=summary["validated_start"] if is_valid else None,
+        validated_end=summary["validated_end"] if is_valid else None,
+        trading_days_expected=summary["trading_days_expected"],
+        trading_days_actual=summary["trading_days_actual"],
+        missing_count=summary["missing_count"],
+        missing_date_samples=summary["missing_date_samples"],
+        last_synced=datetime.now(timezone.utc),
+        validation_status=summary["validation_status"],
+        validation_issues=summary["validation_issues"],
+    )
+
+    append_manifest_record(record, root=root_path)
+    return record
+
+
+def sync_universe_history(
+    symbols: list[str],
+    start_date: str | date,
+    end_date: str | date,
+    root: Path | str | None = None,
+    fetcher: Fetcher | None = None,
+) -> dict[str, ManifestRecord]:
+    """Sync multiple symbols by delegating to sync_symbol_history."""
+    records: dict[str, ManifestRecord] = {}
+    for symbol in symbols:
+        records[symbol] = sync_symbol_history(
+            symbol,
+            start_date,
+            end_date,
+            root=root,
+            fetcher=fetcher,
+        )
+    return records
