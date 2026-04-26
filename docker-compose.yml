@@ -18,10 +18,10 @@ services:
       - .env
 
     # --- Cron Schedule ---
-    # The container runs the daily signal generator at 18:00 JST (9:00 UTC).
-    # Uses supercronic (below) for reliable cron inside Docker.
+    # Runs daily at 15:45 JST (06:45 UTC) on weekdays.
+    # Uses supercronic for reliable cron inside Docker.
     command: >
-      sh -c "echo '0 9 * * 1-5 python3 -m src.paper.bot generate >> /app/logs/daily.log 2>&1' | supercronic -"
+      sh -c "echo '45 6 * * 1-5 python3 -m src.paper.bot generate --universe-name japan_large_30 --momentum-definition 12_1 --reversal-filter --auto-fill >> /app/logs/daily.log 2>&1' | supercronic -"
 
     restart: unless-stopped
     

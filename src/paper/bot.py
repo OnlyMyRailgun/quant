@@ -229,27 +229,28 @@ def generate_rebalance_orders(
             order_ids.append((oid, 'SELL', price))
             
     print("\n✅ Target orders staged in the paper trading database.")
-    print("Run this script using 'fill <ORDER_ID> <YOUR_ACTUAL_EXECUTION_PRICE>' tomorrow after you trade them on your app!")
 
-    # Send daily summary email
-    conn2 = sqlite3.connect(DB_PATH)
-    cur2 = conn2.cursor()
-    cur2.execute("SELECT id, date, symbol, action, target_shares, theoretical_price FROM orders WHERE status='PENDING'")
-    pending_orders = cur2.fetchall()
-    cur2.execute('SELECT symbol, shares, avg_price FROM portfolio')
-    full_portfolio = cur2.fetchall()
-    conn2.close()
+    if not auto_fill:
+        print("Run this script using 'fill <ORDER_ID> <YOUR_ACTUAL_EXECUTION_PRICE>' tomorrow after you trade them on your app!")
+        # Send daily summary email (manual mode only)
+        conn2 = sqlite3.connect(DB_PATH)
+        cur2 = conn2.cursor()
+        cur2.execute("SELECT id, date, symbol, action, target_shares, theoretical_price FROM orders WHERE status='PENDING'")
+        pending_orders = cur2.fetchall()
+        cur2.execute('SELECT symbol, shares, avg_price FROM portfolio')
+        full_portfolio = cur2.fetchall()
+        conn2.close()
 
-    winners_list = [
-        {'symbol': row['symbol'], 'price': row['price'], 'score': row['total_score']}
-        for _, row in winners.iterrows()
-    ]
-    send_daily_report(
-        winners=winners_list,
-        orders=pending_orders,
-        cash=wallet_cash,
-        portfolio=full_portfolio,
-    )
+        winners_list = [
+            {'symbol': row['symbol'], 'price': row['price'], 'score': row['total_score']}
+            for _, row in winners.iterrows()
+        ]
+        send_daily_report(
+            winners=winners_list,
+            orders=pending_orders,
+            cash=wallet_cash,
+            portfolio=full_portfolio,
+        )
 
     if auto_fill:
         from src.engine.commission import load_live_slippage

@@ -24,6 +24,14 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
+# Install supercronic for cron scheduling
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && curl -fsSL https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-arm64 -o /usr/local/bin/supercronic \
+    && chmod +x /usr/local/bin/supercronic \
+    && apt-get remove -y curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local
 
