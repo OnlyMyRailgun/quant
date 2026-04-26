@@ -273,6 +273,7 @@ def evaluate_weight_tuple(
     momentum_definition: str = "90d",
     evaluation_start: str | None = None,
     evaluation_end: str | None = None,
+    reversal_filter_params=None,
 ) -> dict[str, float]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -311,6 +312,11 @@ def evaluate_weight_tuple(
             weight_rev=weights[2],
         )
 
+    if reversal_filter_params is not None:
+        from src.research.reversal_filter import apply_reversal_filter
+        result = apply_reversal_filter(scores, window_dfs, reversal_filter_params)
+        scores = result["filtered_scores"]
+
     strategy_class = _build_execution_strategy_class(momentum_definition)
     suppress_output(strategy_class)
 
@@ -320,6 +326,7 @@ def evaluate_weight_tuple(
         weight_mom=weights[0],
         weight_vol=weights[1],
         weight_rev=weights[2],
+        reversal_filter_params=reversal_filter_params,
     )
 
     for symbol, df in window_dfs.items():

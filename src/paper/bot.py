@@ -84,6 +84,7 @@ def calculate_current_signals(
     lookback_vol=DEFAULT_LOOKBACK_VOL,
     lookback_rev=DEFAULT_LOOKBACK_REV,
     artifact_dir: Path | None = None,
+    reversal_filter_params=None,
 ):
     """
     Shared paper-trading scorer for generating today's live signals.
@@ -108,6 +109,11 @@ def calculate_current_signals(
         lookback_vol=lookback_vol,
         lookback_rev=lookback_rev,
     )
+
+    if reversal_filter_params is not None:
+        from src.research.reversal_filter import apply_reversal_filter
+        result = apply_reversal_filter(ranked, data_dfs, reversal_filter_params)
+        ranked = result["filtered_scores"]
 
     if artifact_dir is not None:
         winners = ranked.head(top_n)

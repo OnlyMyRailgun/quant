@@ -27,6 +27,7 @@ class UniversalMultiFactor(bt.Strategy):
         artifact_dir=None,
         artifact_run_name="multi_factor_rebalance",
         universe_name=None,
+        reversal_filter_params=None,
     )
 
     def __init__(self):
@@ -151,6 +152,13 @@ class UniversalMultiFactor(bt.Strategy):
         ranked = self._score_visible_universe()
         if ranked.empty:
             return
+
+        if self.p.reversal_filter_params is not None:
+            from src.research.reversal_filter import apply_reversal_filter
+            result = apply_reversal_filter(ranked, self._collect_visible_history(), self.p.reversal_filter_params)
+            ranked = result["filtered_scores"]
+            if ranked.empty:
+                return
 
         self.rebalance_count += 1
         self._persist_rebalance_artifact(ranked)
