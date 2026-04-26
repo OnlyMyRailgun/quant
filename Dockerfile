@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv and resolve dependencies from the project lockfile
 RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock ./
-RUN uv export --frozen --no-dev --format requirements-txt -o requirements.lock \
+RUN uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.lock \
     && pip install --no-cache-dir --prefix=/install -r requirements.lock
 
 # ─────────────────────────────────────────────────────────────
