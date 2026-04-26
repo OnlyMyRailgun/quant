@@ -813,7 +813,7 @@ def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator
     monkeypatch,
     tmp_path: Path,
 ):
-    def fake_evaluate_weight_tuple(data_dfs, start, end, weights):
+    def fake_evaluate_weight_tuple(data_dfs, start, end, weights, **kwargs):
         del data_dfs
         if (start, end) == ("2021-01-01", "2021-12-31"):
             if weights == (1.0, 0.0, 0.0):
@@ -1197,6 +1197,7 @@ def test_walk_forward_research_can_load_local_data_without_calling_network_fetch
         momentum_definition="90d",
         evaluation_start=None,
         evaluation_end=None,
+        reversal_filter_params=None,
     ):
         del start, end, weights, evaluation_start, evaluation_end
         assert set(data_dfs) == set(symbols)
@@ -1256,6 +1257,7 @@ def test_walk_forward_local_optimize_defaults_to_current_directory_root(
         momentum_definition="90d",
         evaluation_start=None,
         evaluation_end=None,
+        reversal_filter_params=None,
     ):
         del start, end, weights, evaluation_start, evaluation_end
         assert set(data_dfs) == set(symbols)
@@ -1309,6 +1311,7 @@ def test_local_walk_forward_loads_include_enough_warmup_for_short_validation_win
         momentum_definition="90d",
         evaluation_start=None,
         evaluation_end=None,
+        reversal_filter_params=None,
     ):
         del data_dfs, end, weights, momentum_definition, evaluation_end
         if evaluation_start is not None:
@@ -1400,6 +1403,7 @@ def test_local_optimize_requests_12_1_specific_warmup(monkeypatch, tmp_path: Pat
         momentum_definition="90d",
         evaluation_start=None,
         evaluation_end=None,
+        reversal_filter_params=None,
     ):
         del data_dfs, start, end, weights, evaluation_start, evaluation_end
         assert momentum_definition == "12_1"
@@ -1499,6 +1503,7 @@ def test_run_walk_forward_optimization_accepts_12_1_momentum_override(monkeypatc
         momentum_definition="90d",
         evaluation_start=None,
         evaluation_end=None,
+        reversal_filter_params=None,
     ):
         del data_dfs, start, end, weights, evaluation_start, evaluation_end
         return {
