@@ -135,6 +135,7 @@ def resolve_multi_factor_strategy_kwargs(
     sell_rank_threshold=None,
     artifact_run_name=None,
     universe_name=None,
+    reversal_filter_params=None,
 ):
     kwargs = resolve_multi_factor_weights(
         artifact_dir=artifact_dir,
@@ -152,6 +153,8 @@ def resolve_multi_factor_strategy_kwargs(
         kwargs["artifact_run_name"] = artifact_run_name
     if universe_name is not None:
         kwargs["universe_name"] = universe_name
+    if reversal_filter_params is not None:
+        kwargs["reversal_filter_params"] = reversal_filter_params
     return kwargs
 
 
@@ -241,6 +244,23 @@ def main():
     parser.add_argument("--start", type=str, default="2023-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default="2024-01-01", help="End date (YYYY-MM-DD)")
     parser.add_argument("--no-plot", action="store_true", help="Disable plotting (useful for CI)")
+    parser.add_argument(
+        "--reversal-filter",
+        action="store_true",
+        help="Enable reversal filter with default params (lookback=20, threshold=0.10)",
+    )
+    parser.add_argument(
+        "--reversal-lookback",
+        type=int,
+        default=20,
+        help="Reversal filter lookback days (default: 20)",
+    )
+    parser.add_argument(
+        "--reversal-threshold",
+        type=float,
+        default=0.10,
+        help="Reversal filter drawdown threshold (default: 0.10)",
+    )
 
     args = parser.parse_args()
 
@@ -289,6 +309,14 @@ def main():
     }
     selected_strategy = strategy_map[args.strategy]
     
+    reversal_filter_params = None
+    if args.reversal_filter:
+        from src.research.reversal_filter import ReversalFilterParams
+        reversal_filter_params = ReversalFilterParams(
+            lookback_days=args.reversal_lookback,
+            threshold=args.reversal_threshold,
+        )
+
     kwargs = {}
     if args.strategy == "multi":
         kwargs = resolve_multi_factor_strategy_kwargs(
@@ -300,6 +328,7 @@ def main():
             sell_rank_threshold=args.sell_rank_threshold,
             artifact_run_name="backtest_rebalance",
             universe_name=selected_universe_name,
+            reversal_filter_params=reversal_filter_params,
         )
 
     if selected_universe_name is not None:

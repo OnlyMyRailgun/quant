@@ -223,6 +223,7 @@ def _evaluate_weight_tuple_with_momentum(
     end: str,
     weights: tuple[float, float, float],
     momentum_definition: str,
+    reversal_filter_params=None,
 ) -> dict[str, object]:
     if momentum_definition != "90d":
         return evaluate_weight_tuple(
@@ -231,6 +232,7 @@ def _evaluate_weight_tuple_with_momentum(
             end,
             weights,
             momentum_definition=momentum_definition,
+            reversal_filter_params=reversal_filter_params,
         )
 
     try:
@@ -240,6 +242,7 @@ def _evaluate_weight_tuple_with_momentum(
             end,
             weights,
             momentum_definition=momentum_definition,
+            reversal_filter_params=reversal_filter_params,
         )
     except TypeError as exc:
         if "momentum_definition" not in str(exc):
@@ -413,6 +416,7 @@ def run_walk_forward_optimization(
     local_store_root: Path | str | None = None,
     local_warmup_bars: int | None = None,
     local_allowed_validation_statuses: tuple[str, ...] = ("ok",),
+    reversal_filter_params=None,
 ) -> dict[str, object]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -497,6 +501,7 @@ def run_walk_forward_optimization(
                 momentum_definition=momentum_definition,
                 evaluation_start=window["train_start"],
                 evaluation_end=window["train_end"],
+                reversal_filter_params=reversal_filter_params,
             )
 
         def evaluate_validation_window(window, weights):
@@ -536,6 +541,7 @@ def run_walk_forward_optimization(
                 momentum_definition=momentum_definition,
                 evaluation_start=window["validation_start"],
                 evaluation_end=window["validation_end"],
+                reversal_filter_params=reversal_filter_params,
             )
 
         def evaluate_one_shot_training_window(weights):
@@ -548,6 +554,7 @@ def run_walk_forward_optimization(
                 momentum_definition=momentum_definition,
                 evaluation_start=start,
                 evaluation_end=end,
+                reversal_filter_params=reversal_filter_params,
             )
 
         def evaluate_one_shot_validation_window(window, weights):
@@ -564,6 +571,7 @@ def run_walk_forward_optimization(
                 momentum_definition=momentum_definition,
                 evaluation_start=window["validation_start"],
                 evaluation_end=window["validation_end"],
+                reversal_filter_params=reversal_filter_params,
             )
 
     else:
@@ -574,6 +582,7 @@ def run_walk_forward_optimization(
                 window["train_end"],
                 weights,
                 momentum_definition,
+                reversal_filter_params=reversal_filter_params,
             )
 
         def evaluate_validation_window(window, weights):
@@ -583,6 +592,7 @@ def run_walk_forward_optimization(
                 window["validation_end"],
                 weights,
                 momentum_definition,
+                reversal_filter_params=reversal_filter_params,
             ) | _build_validation_participation_metrics(
                 data_dfs=data_dfs,
                 universe_symbols=universe_symbols,
@@ -597,6 +607,7 @@ def run_walk_forward_optimization(
                 window["validation_end"],
                 DEFAULT_BASELINE_WEIGHTS,
                 momentum_definition,
+                reversal_filter_params=reversal_filter_params,
             )
 
         def evaluate_one_shot_training_window(weights):
@@ -606,6 +617,7 @@ def run_walk_forward_optimization(
                 end,
                 weights,
                 momentum_definition,
+                reversal_filter_params=reversal_filter_params,
             )
 
         def evaluate_one_shot_validation_window(window, weights):
@@ -615,6 +627,7 @@ def run_walk_forward_optimization(
                 window["validation_end"],
                 weights,
                 momentum_definition,
+                reversal_filter_params=reversal_filter_params,
             )
 
     result = run_walk_forward_experiment(
@@ -730,6 +743,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--step-months", type=int, default=DEFAULT_STEP_MONTHS, help="Walk-forward step size in months")
     parser.add_argument("--artifact-dir", type=Path, default=DEFAULT_ARTIFACT_DIR, help="Artifact output directory")
+    parser.add_argument(
+        "--reversal-filter",
+        action="store_true",
+        help="Enable reversal filter with default params (lookback=20, threshold=0.10)",
+    )
+    parser.add_argument(
+        "--reversal-lookback",
+        type=int,
+        default=20,
+        help="Reversal filter lookback days (default: 20)",
+    )
+    parser.add_argument(
+        "--reversal-threshold",
+        type=float,
+        default=0.10,
+        help="Reversal filter drawdown threshold (default: 0.10)",
+    )
     return parser
 
 
@@ -770,6 +800,14 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             print(f"Benchmark data fetch skipped: {exc}")
 
+    reversal_filter_params = None
+    if args.reversal_filter:
+        from src.research.reversal_filter import ReversalFilterParams
+        reversal_filter_params = ReversalFilterParams(
+            lookback_days=args.reversal_lookback,
+            threshold=args.reversal_threshold,
+        )
+
     try:
         run_walk_forward_optimization(
             data_dfs=data_dfs,
@@ -789,6 +827,7 @@ def main(argv: list[str] | None = None) -> int:
             momentum_definition=args.momentum_definition,
             local_store_root=args.local_store_root,
             local_warmup_bars=args.local_warmup_bars,
+            reversal_filter_params=reversal_filter_params,
         )
     except local_store.LocalDataSyncRequiredError as exc:
         print(f"Local data sync required: {exc}")
