@@ -320,13 +320,18 @@ def evaluate_weight_tuple(
     strategy_class = _build_execution_strategy_class(momentum_definition)
     suppress_output(strategy_class)
 
+    strategy_kwargs: dict = {
+        "weight_mom": weights[0],
+        "weight_vol": weights[1],
+        "weight_rev": weights[2],
+    }
+    if reversal_filter_params is not None:
+        strategy_kwargs["reversal_filter_params"] = reversal_filter_params
+
     cerebro = bt.Cerebro()
     cerebro.addstrategy(
         strategy_class,
-        weight_mom=weights[0],
-        weight_vol=weights[1],
-        weight_rev=weights[2],
-        reversal_filter_params=reversal_filter_params,
+        **strategy_kwargs,
     )
 
     for symbol, df in window_dfs.items():
