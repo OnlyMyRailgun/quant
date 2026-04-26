@@ -52,7 +52,19 @@ def _build_signal_run(
     lookback_mom=DEFAULT_LOOKBACK_MOM,
     lookback_vol=DEFAULT_LOOKBACK_VOL,
     lookback_rev=DEFAULT_LOOKBACK_REV,
+    momentum_definition="90d",
 ):
+    if momentum_definition != "90d":
+        from src.research.research_scoring import score_research_universe
+        ranked = score_research_universe(
+            data_dfs,
+            top_n=top_n,
+            weight_mom=weight_mom,
+            weight_vol=weight_vol,
+            weight_rev=weight_rev,
+            momentum_definition=momentum_definition,
+        )
+        return ranked
     ranked = score_universe(
         data_dfs,
         top_n=top_n,
@@ -85,6 +97,7 @@ def calculate_current_signals(
     lookback_rev=DEFAULT_LOOKBACK_REV,
     artifact_dir: Path | None = None,
     reversal_filter_params=None,
+    momentum_definition="90d",
 ):
     """
     Shared paper-trading scorer for generating today's live signals.
@@ -108,6 +121,7 @@ def calculate_current_signals(
         lookback_mom=lookback_mom,
         lookback_vol=lookback_vol,
         lookback_rev=lookback_rev,
+        momentum_definition=momentum_definition,
     )
 
     if reversal_filter_params is not None:
@@ -141,20 +155,30 @@ def calculate_current_signals(
 
     return _with_legacy_factor_aliases(ranked.head(top_n))
 
-def generate_rebalance_orders():
-    from src.data.universe import get_topix_top_10
+def generate_rebalance_orders(
+    universe_name="topix_top_10",
+    momentum_definition="90d",
+    reversal_filter_params=None,
+):
+    from src.data.universe import get_universe
     from src.data.bulk_loader import fetch_universe
 
-    print("Fetching latest data from Yahoo Finance for live signal generation...")
-    symbols = get_topix_top_10()
-    # Need at least 150 days to ensure enough history for our indicators
-    start_date = (pd.Timestamp.today() - pd.Timedelta(days=200)).strftime("%Y-%m-%d")
+    symbols = get_universe(universe_name)
+
+    print(f"Fetching latest data for {len(symbols)} symbols ({universe_name})...")
+    # Need at least 300 days for 12_1 momentum lookback
+    history_days = 400 if momentum_definition == "12_1" else 200
+    start_date = (pd.Timestamp.today() - pd.Timedelta(days=history_days)).strftime("%Y-%m-%d")
     end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
-    
+
     dfs = fetch_universe(symbols, start_date, end_date)
-    
-    print("\nRunning UniversalMultiFactor Scoring Engine on Latest Close...")
-    winners = calculate_current_signals(dfs, top_n=3, artifact_dir=DEFAULT_ARTIFACT_DIR)
+
+    print("\nRunning Multi-Factor Scoring Engine on Latest Close...")
+    winners = calculate_current_signals(
+        dfs, top_n=3, artifact_dir=DEFAULT_ARTIFACT_DIR,
+        momentum_definition=momentum_definition,
+        reversal_filter_params=reversal_filter_params,
+    )
     
     print("\n🏆 TODAY'S WINNING PORTFOLIO:")
     print(tabulate(winners[['symbol', 'price', 'total_score']], headers='keys', tablefmt='psql', showindex=False))
@@ -264,6 +288,34 @@ if __name__ == "__main__":
     
     # 'generate' command
     p_gen = subparsers.add_parser('generate', help='Fetch latest prices and generate tomorrow\'s target BUY/SELL orders')
+    p_gen.add_argument(
+        "--universe-name",
+        default="topix_top_10",
+        help="Named universe from src.data.universe (default: topix_top_10)",
+    )
+    p_gen.add_argument(
+        "--momentum-definition",
+        choices=["90d", "12_1"],
+        default="90d",
+        help="Momentum definition (default: 90d)",
+    )
+    p_gen.add_argument(
+        "--reversal-filter",
+        action="store_true",
+        help="Enable reversal filter with default params",
+    )
+    p_gen.add_argument(
+        "--reversal-lookback",
+        type=int,
+        default=20,
+        help="Reversal filter lookback days",
+    )
+    p_gen.add_argument(
+        "--reversal-threshold",
+        type=float,
+        default=0.10,
+        help="Reversal filter drawdown threshold",
+    )
     
     # 'fill' command
     p_fill = subparsers.add_parser('fill', help='Register manual paper execution to trigger the Slippage Feedback Loop')
@@ -275,7 +327,18 @@ if __name__ == "__main__":
     if args.command == 'status':
         print_status()
     elif args.command == 'generate':
-        generate_rebalance_orders()
+        reversal_filter_params = None
+        if args.reversal_filter:
+            from src.research.reversal_filter import ReversalFilterParams
+            reversal_filter_params = ReversalFilterParams(
+                lookback_days=args.reversal_lookback,
+                threshold=args.reversal_threshold,
+            )
+        generate_rebalance_orders(
+            universe_name=args.universe_name,
+            momentum_definition=args.momentum_definition,
+            reversal_filter_params=reversal_filter_params,
+        )
     elif args.command == 'fill':
         fill_order(args.order_id, args.actual_price)
     else:
