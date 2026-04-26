@@ -159,6 +159,7 @@ def generate_rebalance_orders(
     universe_name="topix_top_10",
     momentum_definition="90d",
     reversal_filter_params=None,
+    auto_fill=False,
 ):
     from src.data.universe import get_universe
     from src.data.bulk_loader import fetch_universe
@@ -195,32 +196,37 @@ def generate_rebalance_orders(
     print(f"\nEvaluating Rebalance Diff. Available Cash: ¥{wallet_cash:,.2f}")
     
     target_symbols = winners['symbol'].tolist()
-    
+
+    order_ids: list[tuple[int, str, float]] = []
+
     # 1. Determine SELL orders (what we hold but shouldn't)
     for sym, shares in current_portfolio.items():
         if sym not in target_symbols:
             price = dfs[sym]['Close'].iloc[-1]
-            place_pending_order(sym, 'SELL', shares, theoretical_price=price)
-            
+            oid = place_pending_order(sym, 'SELL', shares, theoretical_price=price)
+            order_ids.append((oid, 'SELL', price))
+
     # 2. Determine BUY orders (allocating cash equally)
     # Note: A real system handles sell proceeds simultaneously.
     # For MVP we simply assume we divide current + theoretical proceeds equally.
     # To keep it safe, we just use the fixed theoretical target weight
     target_value_per_stock = wallet_cash * 0.95 / len(target_symbols)
-    
+
     for _, row in winners.iterrows():
         sym = row['symbol']
         price = row['price']
-        
+
         current_shares = current_portfolio.get(sym, 0)
         target_shares = int(target_value_per_stock / price)
-        
+
         diff = target_shares - current_shares
-        
+
         if diff > 0:
-            place_pending_order(sym, 'BUY', diff, theoretical_price=price)
+            oid = place_pending_order(sym, 'BUY', diff, theoretical_price=price)
+            order_ids.append((oid, 'BUY', price))
         elif diff < 0:
-            place_pending_order(sym, 'SELL', abs(diff), theoretical_price=price)
+            oid = place_pending_order(sym, 'SELL', abs(diff), theoretical_price=price)
+            order_ids.append((oid, 'SELL', price))
             
     print("\n✅ Target orders staged in the paper trading database.")
     print("Run this script using 'fill <ORDER_ID> <YOUR_ACTUAL_EXECUTION_PRICE>' tomorrow after you trade them on your app!")
@@ -244,6 +250,24 @@ def generate_rebalance_orders(
         cash=wallet_cash,
         portfolio=full_portfolio,
     )
+
+    if auto_fill:
+        from src.engine.commission import load_live_slippage
+        from src.paper.db import fill_order
+
+        slippage = load_live_slippage()
+        filled: list[tuple[int, str, float, float]] = []
+        for oid, action, tprice in order_ids:
+            actual_price = tprice * (1 - slippage)
+            fill_order(oid, actual_price)
+            filled.append((oid, action, tprice, actual_price))
+
+        print(f"\n✅ Auto-filled {len(filled)} orders (slippage {slippage*100:.2f}%):")
+        print(tabulate(
+            [(oid, action, f"¥{tp:,.2f}", f"¥{ap:,.2f}") for oid, action, tp, ap in filled],
+            headers=["Order ID", "Action", "Theoretical Price", "Fill Price"],
+            tablefmt='psql',
+        ))
 
 def print_status():
     wallet_cash = get_wallet_balance()
@@ -316,6 +340,11 @@ if __name__ == "__main__":
         default=0.10,
         help="Reversal filter drawdown threshold",
     )
+    p_gen.add_argument(
+        "--auto-fill",
+        action="store_true",
+        help="Auto-fill orders at close price minus slippage",
+    )
     
     # 'fill' command
     p_fill = subparsers.add_parser('fill', help='Register manual paper execution to trigger the Slippage Feedback Loop')
@@ -338,6 +367,7 @@ if __name__ == "__main__":
             universe_name=args.universe_name,
             momentum_definition=args.momentum_definition,
             reversal_filter_params=reversal_filter_params,
+            auto_fill=args.auto_fill,
         )
     elif args.command == 'fill':
         fill_order(args.order_id, args.actual_price)
