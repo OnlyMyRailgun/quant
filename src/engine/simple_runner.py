@@ -122,7 +122,7 @@ def run_backtest_simple(
             for sym in picks:
                 px = prices.get(sym)
                 if px and px > 0:
-                    shares = int(budget / px)
+                    shares = int(budget / px / 100) * 100
                     cost = shares * px * (1 + fee_rate)
                     cash -= cost
                     holdings[sym] = (shares, px)

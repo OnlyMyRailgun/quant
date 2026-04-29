@@ -225,6 +225,7 @@ def _evaluate_weight_tuple_with_momentum(
     momentum_definition: str,
     reversal_filter_params=None,
     engine="simple",
+    book_values: dict[str, float | None] | None = None,
 ) -> dict[str, object]:
     if momentum_definition != "90d":
         return evaluate_weight_tuple(
@@ -281,6 +282,7 @@ def evaluate_weight_tuple(
     evaluation_end: str | None = None,
     reversal_filter_params=None,
     engine="backtrader",
+    book_values: dict[str, float | None] | None = None,
 ) -> dict[str, float]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -314,6 +316,7 @@ def evaluate_weight_tuple(
             weight_rev=weights[2],
             weight_val=w_val,
             momentum_definition=momentum_definition,
+            book_values=book_values,
         )
     else:
         scores = score_universe(
@@ -322,6 +325,7 @@ def evaluate_weight_tuple(
             weight_vol=weights[1],
             weight_rev=weights[2],
             weight_val=w_val,
+            book_values=book_values,
         )
 
     if reversal_filter_params is not None:
@@ -337,6 +341,7 @@ def evaluate_weight_tuple(
             momentum_definition=momentum_definition,
             reversal_filter_params=reversal_filter_params,
             evaluation_start=eval_start, evaluation_end=eval_end,
+            book_values=book_values,
         )
 
     if engine == "vectorbt":
@@ -456,6 +461,7 @@ def run_walk_forward_optimization(
     local_allowed_validation_statuses: tuple[str, ...] = ("ok",),
     reversal_filter_params=None,
     engine="simple",
+    book_values: dict[str, float | None] | None = None,
 ) -> dict[str, object]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -863,6 +869,10 @@ def main(argv: list[str] | None = None) -> int:
 
     engine = "vectorbt" if args.fast else args.engine
 
+    # Fetch book values for value factor (semi-static annual data)
+    from src.data.fundamental_loader import get_book_values
+    book_values = get_book_values(symbols, as_of_date=pd.Timestamp(args.end))
+
     try:
         run_walk_forward_optimization(
             data_dfs=data_dfs,
@@ -884,6 +894,7 @@ def main(argv: list[str] | None = None) -> int:
             local_warmup_bars=args.local_warmup_bars,
             reversal_filter_params=reversal_filter_params,
             engine=engine,
+            book_values=book_values,
         )
     except local_store.LocalDataSyncRequiredError as exc:
         print(f"Local data sync required: {exc}")
