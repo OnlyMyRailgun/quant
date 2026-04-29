@@ -18,7 +18,7 @@ def test_generate_rebalance_orders_uses_default_approved_params_artifact_dir(mon
     db = sqlite3.connect(bot.DB_PATH)
     db.execute("CREATE TABLE portfolio (symbol TEXT, shares INTEGER, avg_price REAL)")
     db.execute(
-        "CREATE TABLE orders (id INTEGER, date TEXT, symbol TEXT, action TEXT, target_shares INTEGER, theoretical_price REAL, status TEXT)"
+        "CREATE TABLE orders (id INTEGER, date TEXT, symbol TEXT, action TEXT, target_shares INTEGER, theoretical_price REAL, actual_price REAL, slippage_pct REAL, status TEXT)"
     )
     db.commit()
     db.close()
