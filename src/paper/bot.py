@@ -6,7 +6,7 @@ from datetime import datetime
 from tabulate import tabulate
 
 from src.research.artifacts import DEFAULT_ARTIFACT_DIR, build_scoring_metadata, build_scoring_summary, write_scoring_run
-from src.research.approved_params import resolve_approved_weight_values
+from src.research.approved_params import resolve_approved_weight_values, load_approved_paper_trading_params
 from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_MOM,
     DEFAULT_LOOKBACK_REV,
@@ -49,10 +49,14 @@ def _build_signal_run(
     weight_mom=1.0,
     weight_vol=1.0,
     weight_rev=1.0,
+    weight_val=0.0,
+    weight_qual=0.0,
     lookback_mom=DEFAULT_LOOKBACK_MOM,
     lookback_vol=DEFAULT_LOOKBACK_VOL,
     lookback_rev=DEFAULT_LOOKBACK_REV,
     momentum_definition="90d",
+    book_values=None,
+    roe_values=None,
 ):
     if momentum_definition != "90d":
         from src.research.research_scoring import score_research_universe
@@ -62,7 +66,9 @@ def _build_signal_run(
             weight_mom=weight_mom,
             weight_vol=weight_vol,
             weight_rev=weight_rev,
+            weight_val=weight_val,
             momentum_definition=momentum_definition,
+            book_values=book_values,
         )
         return ranked
     ranked = score_universe(
@@ -71,9 +77,13 @@ def _build_signal_run(
         weight_mom=weight_mom,
         weight_vol=weight_vol,
         weight_rev=weight_rev,
+        weight_val=weight_val,
+        weight_qual=weight_qual,
         lookback_mom=lookback_mom,
         lookback_vol=lookback_vol,
         lookback_rev=lookback_rev,
+        book_values=book_values,
+        roe_values=roe_values,
     )
     return ranked
 
@@ -92,12 +102,16 @@ def calculate_current_signals(
     weight_mom: float | None = None,
     weight_vol: float | None = None,
     weight_rev: float | None = None,
+    weight_val: float = 0.0,
+    weight_qual: float = 0.0,
     lookback_mom=DEFAULT_LOOKBACK_MOM,
     lookback_vol=DEFAULT_LOOKBACK_VOL,
     lookback_rev=DEFAULT_LOOKBACK_REV,
     artifact_dir: Path | None = None,
     reversal_filter_params=None,
     momentum_definition="90d",
+    book_values=None,
+    roe_values=None,
 ):
     """
     Shared paper-trading scorer for generating today's live signals.
@@ -111,6 +125,14 @@ def calculate_current_signals(
         weight_vol=weight_vol,
         weight_rev=weight_rev,
     )
+    # val/qual weights: use approved JSON if available, otherwise passed values
+    if artifact_dir is not None:
+        approved = load_approved_paper_trading_params(Path(artifact_dir))
+        aw = approved["weights"] if approved else {}
+    else:
+        aw = {}
+    resolved_weight_val = float(aw.get("val", weight_val)) if weight_val == 0.0 else weight_val
+    resolved_weight_qual = float(aw.get("qual", weight_qual)) if weight_qual == 0.0 else weight_qual
 
     ranked = _build_signal_run(
         data_dfs,
@@ -118,10 +140,14 @@ def calculate_current_signals(
         weight_mom=resolved_weight_mom,
         weight_vol=resolved_weight_vol,
         weight_rev=resolved_weight_rev,
+        weight_val=resolved_weight_val,
+        weight_qual=resolved_weight_qual,
         lookback_mom=lookback_mom,
         lookback_vol=lookback_vol,
         lookback_rev=lookback_rev,
         momentum_definition=momentum_definition,
+        book_values=book_values,
+        roe_values=roe_values,
     )
 
     if reversal_filter_params is not None:
@@ -187,11 +213,28 @@ def generate_rebalance_orders(
 
     dfs = fetch_universe(symbols, start_date, end_date)
 
+    # Fetch fundamental data for value and quality factors
+    import yfinance as yf
+    from src.data.fundamental_loader import get_book_values
+    book_vals = get_book_values(symbols)
+    div_vals = {}
+    for sym in symbols:
+        try:
+            t = yf.Ticker(sym)
+            d = t.info.get("dividendYield")
+            if d and d > 0 and not pd.isna(d):
+                if d > 0.5: d /= 100.0
+                if d <= 0.5: div_vals[sym] = round(float(d), 6)
+        except Exception:
+            pass
+
     print("\nRunning Multi-Factor Scoring Engine on Latest Close...")
     winners = calculate_current_signals(
         dfs, top_n=3, artifact_dir=DEFAULT_ARTIFACT_DIR,
         momentum_definition=momentum_definition,
         reversal_filter_params=reversal_filter_params,
+        weight_val=0.5, weight_qual=1.0,
+        book_values=book_vals, roe_values=div_vals,
     )
     
     print("\n🏆 TODAY'S WINNING PORTFOLIO:")
