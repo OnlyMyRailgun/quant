@@ -66,6 +66,7 @@ def score_research_universe(
     weight_vol: float = 1.0,
     weight_rev: float = 1.0,
     weight_val: float = 0.0,
+    weight_qual: float = 0.0,
     momentum_definition: Literal["90d", "12_1"] = "90d",
     lookback_vol: int = DEFAULT_LOOKBACK_VOL,
     lookback_rev: int = DEFAULT_LOOKBACK_REV,
