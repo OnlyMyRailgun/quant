@@ -27,6 +27,39 @@ def run_backtest(
         momentum_definition: Momentum definition ("90d" or "12_1").
         reversal_filter_params: Optional reversal filter parameters.
     """
+    if engine == "simple":
+        from src.engine.simple_runner import run_backtest_simple
+
+        params = getattr(strategy_class, "params", None)
+        top_n = getattr(params, "top_n", 3) if params is not None else 3
+        weight_mom = getattr(params, "weight_mom", 1.0) if params is not None else 1.0
+        weight_vol = getattr(params, "weight_vol", 1.0) if params is not None else 1.0
+        weight_rev = getattr(params, "weight_rev", 1.0) if params is not None else 1.0
+
+        earliest = min(df.index.min() for df in data_dfs.values() if not df.empty)
+        latest = max(df.index.max() for df in data_dfs.values() if not df.empty)
+
+        result = run_backtest_simple(
+            data_dfs=data_dfs,
+            start=earliest.strftime("%Y-%m-%d"),
+            end=latest.strftime("%Y-%m-%d"),
+            weights=(weight_mom, weight_vol, weight_rev),
+            top_n=top_n,
+            momentum_definition=momentum_definition,
+            reversal_filter_params=reversal_filter_params,
+        )
+
+        metrics = {
+            "final_value": initial_cash * (1 + result.get("return_pct", 0.0) / 100.0),
+            "sharpe": result.get("sharpe", 0.0),
+            "max_drawdown": result.get("drawdown", 0.0),
+            "total_return": result.get("return_pct", 0.0) / 100.0,
+            "rebalance_count": 0,
+            "position_change_count": 0,
+            "turnover_ratio": 0.0,
+        }
+        return {"metrics": metrics, "cerebro": result}
+
     if engine == "vectorbt":
         from src.engine.vectorbt_runner import run_backtest_vectorbt
 

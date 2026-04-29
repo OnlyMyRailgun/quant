@@ -224,7 +224,7 @@ def _evaluate_weight_tuple_with_momentum(
     weights: tuple[float, float, float],
     momentum_definition: str,
     reversal_filter_params=None,
-    engine="backtrader",
+    engine="simple",
 ) -> dict[str, object]:
     if momentum_definition != "90d":
         return evaluate_weight_tuple(
@@ -323,6 +323,16 @@ def evaluate_weight_tuple(
         from src.research.reversal_filter import apply_reversal_filter
         result = apply_reversal_filter(scores, window_dfs, reversal_filter_params)
         scores = result["filtered_scores"]
+
+    if engine == "simple":
+        from src.engine.simple_runner import run_backtest_simple
+        return run_backtest_simple(
+            data_dfs=data_dfs, start=start, end=end,
+            weights=weights, top_n=3,
+            momentum_definition=momentum_definition,
+            reversal_filter_params=reversal_filter_params,
+            evaluation_start=eval_start, evaluation_end=eval_end,
+        )
 
     if engine == "vectorbt":
         from src.engine.vectorbt_runner import run_backtest_vectorbt
@@ -440,7 +450,7 @@ def run_walk_forward_optimization(
     local_warmup_bars: int | None = None,
     local_allowed_validation_statuses: tuple[str, ...] = ("ok",),
     reversal_filter_params=None,
-    engine="backtrader",
+    engine="simple",
 ) -> dict[str, object]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -794,7 +804,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0.10,
         help="Reversal filter drawdown threshold (default: 0.10)",
     )
-    parser.add_argument("--engine", choices=["backtrader", "vectorbt"], default="backtrader",
+    parser.add_argument("--engine", choices=["simple", "backtrader", "vectorbt"], default="simple",
                         help="Backtesting engine (default: backtrader)")
     parser.add_argument("--fast", action="store_true",
                         help="Alias for --engine vectorbt")

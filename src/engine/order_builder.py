@@ -41,12 +41,11 @@ def build_orders(
         target_weight = 0.95 / n
 
         for _, row in top_df.head(n).iterrows():
-            adj_price = row["price"] * (1 - slippage_pct)
             rows.append({
                 "symbol": row["symbol"],
                 "date": date,
                 "size": target_weight,
-                "price": adj_price,
+                "price": float("nan"),
                 "fees": 0.0,
             })
 

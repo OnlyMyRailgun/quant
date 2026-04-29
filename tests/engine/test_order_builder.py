@@ -38,11 +38,10 @@ class TestBuildOrders:
         assert result["size"].iloc[0] == pytest.approx(expected_size)
         assert result["size"].iloc[1] == pytest.approx(expected_size)
 
-        expected_price = 100.0 * (1 - 0.0005)
-        assert result["price"].iloc[0] == pytest.approx(expected_price)
+        # price=NaN → vectorbt uses actual close at execution date (no look-ahead)
+        assert pd.isna(result["price"].iloc[0])
 
-        # Fees are 0.0 in build_orders — commission is applied as a scalar
-        # rate in vectorbt's Portfolio.from_orders(fees=commission_rate)
+        # Fees are 0.0 — commission is applied as scalar rate in from_orders
         assert result["fees"].iloc[0] == 0.0
 
     def test_build_orders_empty_input(self):
@@ -104,8 +103,8 @@ class TestBuildOrders:
         assert period1["size"].iloc[0] == pytest.approx(0.95 / 3)
         assert period2["size"].iloc[0] == pytest.approx(0.95 / 2)
 
-    def test_build_orders_slippage_applied(self):
-        """slippage_pct=0.01 -> price=99.0 (from 100.0)."""
+    def test_build_orders_price_is_nan(self):
+        """Price is NaN so vectorbt uses actual close at execution date."""
         date = pd.Timestamp("2024-01-31")
         scored = make_scored(
             symbols=["A", "B"],
@@ -118,7 +117,7 @@ class TestBuildOrders:
             commission_rate=0.001,
             slippage_pct=0.01,
         )
-        assert result["price"].iloc[0] == pytest.approx(99.0)
+        assert pd.isna(result["price"].iloc[0])
 
     def test_build_orders_no_top_n_rows(self):
         """No is_top_n=True rows -> skip that date."""

@@ -168,6 +168,30 @@ def run_backtest_vectorbt(
         }
 
     # ------------------------------------------------------------------
+    # 4b. Fill actual execution prices from the BMS date
+    #     build_orders() leaves price=NaN; we look up the real close
+    #     at each order's execution date from the data. This prevents
+    #     using the scoring-date close (look-ahead bias).
+    # ------------------------------------------------------------------
+    for idx, o in orders.iterrows():
+        sym = o["symbol"]
+        exec_date = o["date"]
+        df = data_dfs.get(sym)
+        if df is not None and "Close" in df.columns:
+            mask = df.index >= exec_date
+            if mask.any():
+                orders.at[idx, "price"] = float(df.loc[mask, "Close"].iloc[0])
+
+    # Drop any orders that still have NaN price (symbol not in data)
+    orders = orders.dropna(subset=["price"])
+
+    if orders.empty:
+        return {
+            "return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0,
+            "symbol_returns": {}, "scores": pd.DataFrame(),
+        }
+
+    # ------------------------------------------------------------------
     # 5. Build close price matrix
     # ------------------------------------------------------------------
     all_symbols: set[str] = set()
