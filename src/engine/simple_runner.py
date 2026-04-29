@@ -36,8 +36,10 @@ def run_backtest_simple(
     reversal_filter_params=None,
     evaluation_start: str | None = None,
     evaluation_end: str | None = None,
+    book_values: dict[str, float | None] | None = None,
 ) -> dict:
-    w_mom, w_vol, w_rev = weights[:3]\n    w_val = weights[3] if len(weights) > 3 else 0.0
+    w_mom, w_vol, w_rev = weights[:3]
+    w_val = weights[3] if len(weights) > 3 else 0.0
 
     if momentum_definition == "12_1":
         lookback = 252
@@ -73,12 +75,14 @@ def run_backtest_simple(
                 scored = score_research_universe(
                     window_dfs, top_n=top_n,
                     weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
+                    weight_val=w_val, book_values=book_values,
                     momentum_definition=momentum_definition,
                 )
             else:
                 scored = score_universe(
                     window_dfs, top_n=top_n,
                     weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
+                    weight_val=w_val, book_values=book_values,
                 )
         except ValueError:
             continue
