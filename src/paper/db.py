@@ -68,9 +68,11 @@ def place_pending_order(symbol: str, action: str, shares: int, theoretical_price
         INSERT INTO orders (date, symbol, action, target_shares, theoretical_price, status)
         VALUES (?, ?, ?, ?, ?, 'PENDING')
     ''', (date_str, symbol, action, shares, theoretical_price))
+    order_id = cur.lastrowid
     conn.commit()
     conn.close()
     print(f"[{date_str}] SIGNAL GENERATED: {action} {shares} shares of {symbol} (Target theoretical price: ¥{theoretical_price:.2f})")
+    return order_id
 
 def fetch_pending_orders():
     conn = sqlite3.connect(DB_PATH)
