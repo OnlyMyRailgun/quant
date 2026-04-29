@@ -31,10 +31,14 @@ See Required Skill Mapping for the specific skill to invoke.
   - first run a minimal diagnosis
   - print or inspect the key runtime state needed to identify the root cause
   - do not patch code before the cause is understood
-- Any code change:
-  - write or update tests first
-  - confirm the test fails for the intended reason
-  - then implement the fix or feature
+- Any code change — feature, bugfix, or refactor — MUST follow this sequence:
+  - write or update a test first
+  - run the test and confirm it FAILS for the expected reason
+  - only then implement the change
+  - run the test and confirm it PASSES
+  - NEVER write implementation code before a failing test exists
+  - This applies to bug fixes EXACTLY as strictly as it applies to features.
+    A bug is a missing test — write the test that would have caught it, then fix the bug.
 
 ## Required Skill Mapping
 
