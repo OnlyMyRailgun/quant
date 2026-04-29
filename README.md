@@ -91,9 +91,22 @@ sudo docker compose up -d
 sudo docker compose logs
 ```
 
+## Optimization
+
+Two weight optimization methods available via `--optimizer`:
+
+| Method | Description | WF Active Return |
+|--------|------------|:--:|
+| `grid` (default) | Brute-force product({0, 0.5, 1.0}, repeat=4) = 80 combos | -5.2pp |
+| `optuna` | TPE sampler, categorical [0, 0.5, 1.0], 50 trials | **+4.1pp** |
+
+Optuna converges at 50 trials; 100 trials produces identical weights.
+
+**Caveat**: Walk-forward weights (from either method) do NOT reliably generalize to OOS. The 4-factor signal on japan_large_30 is too weak/noisy. Fixed weights (mom=0.5, vol=1.0, val=0.5) found via direct OOS validation remain the best for now.
+
 ## Known Issues
 
-- **Walk-forward overfitting**: The 4D grid (80 combos) can pick pure P/B in-sample, but OOS shows the combined approach (mom=0.5, vol=1.0, P/B=0.5) is more robust. The last window's weights should not be auto-approved without OOS verification.
+- **Walk-forward overfitting**: In-sample weight optimization (grid or optuna) does not produce weights that generalize to OOS. The signal itself is the limiting factor, not the optimization method.
 - **Still trailing N225**: Best configuration is 12.53% vs N225 33.35% over 15 months. Gate FAIL on excess return.
 - **100-share lot constraint**: Reduces returns by ~70% vs fractional-share assumption. High-price stocks may be excluded entirely (e.g., stock at ¥5,800 needs ¥580,000 minimum).
 - **Static universe**: japan_large_30 is a curated list, not point-in-time constituents. Survivorship bias present.

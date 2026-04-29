@@ -40,6 +40,22 @@ See Required Skill Mapping for the specific skill to invoke.
   - This applies to bug fixes EXACTLY as strictly as it applies to features.
     A bug is a missing test — write the test that would have caught it, then fix the bug.
 
+- When expanding a function signature (adding a new parameter):
+  - Python's default values silently hide missing arguments at call sites.
+    A new parameter with default None can be omitted by accident at any
+    call site and the function will silently do nothing.
+  - BEFORE committing: grep ALL call sites of the function and visually
+    verify each one passes the new argument.
+  - If the function is called inside closures (lambdas or nested defs),
+    those closures MUST also accept and forward the parameter.
+  - Add an integration test that exercises the full call chain with
+    real (not monkeypatched) data to catch these gaps.
+  - Lesson from 2026-04-29 book_values bug: 10+ closure call sites inside
+    run_walk_forward_optimization silently defaulted book_values=None for
+    an entire development session, causing the P/B value factor to be
+    completely ignored during walk-forward optimization. The existing
+    unit tests passed because they used monkeypatched fake functions.
+
 ## Required Skill Mapping
 
 - New feature or behavior change:
