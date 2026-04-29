@@ -1198,8 +1198,9 @@ def test_walk_forward_research_can_load_local_data_without_calling_network_fetch
         evaluation_start=None,
         evaluation_end=None,
         reversal_filter_params=None,
+        engine="backtrader",
     ):
-        del start, end, weights, evaluation_start, evaluation_end
+        del start, end, weights, evaluation_start, evaluation_end, engine
         assert set(data_dfs) == set(symbols)
         assert momentum_definition == "90d"
         return {"return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0, "symbol_returns": []}
@@ -1258,8 +1259,9 @@ def test_walk_forward_local_optimize_defaults_to_current_directory_root(
         evaluation_start=None,
         evaluation_end=None,
         reversal_filter_params=None,
+        engine="backtrader",
     ):
-        del start, end, weights, evaluation_start, evaluation_end
+        del start, end, weights, evaluation_start, evaluation_end, engine
         assert set(data_dfs) == set(symbols)
         assert momentum_definition == "90d"
         return {"return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0, "symbol_returns": []}
@@ -1312,8 +1314,9 @@ def test_local_walk_forward_loads_include_enough_warmup_for_short_validation_win
         evaluation_start=None,
         evaluation_end=None,
         reversal_filter_params=None,
+        engine="backtrader",
     ):
-        del data_dfs, end, weights, momentum_definition, evaluation_end
+        del data_dfs, end, weights, momentum_definition, evaluation_end, engine
         if evaluation_start is not None:
             seen_eval_windows.append((start, evaluation_start))
         return {"return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0, "symbol_returns": []}
@@ -1404,8 +1407,9 @@ def test_local_optimize_requests_12_1_specific_warmup(monkeypatch, tmp_path: Pat
         evaluation_start=None,
         evaluation_end=None,
         reversal_filter_params=None,
+        engine="backtrader",
     ):
-        del data_dfs, start, end, weights, evaluation_start, evaluation_end
+        del data_dfs, start, end, weights, evaluation_start, evaluation_end, engine
         assert momentum_definition == "12_1"
         return {"return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0, "symbol_returns": []}
 
@@ -1504,8 +1508,9 @@ def test_run_walk_forward_optimization_accepts_12_1_momentum_override(monkeypatc
         evaluation_start=None,
         evaluation_end=None,
         reversal_filter_params=None,
+        engine="backtrader",
     ):
-        del data_dfs, start, end, weights, evaluation_start, evaluation_end
+        del data_dfs, start, end, weights, evaluation_start, evaluation_end, engine
         return {
             "return_pct": 1.0,
             "sharpe": 0.1,

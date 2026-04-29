@@ -224,6 +224,7 @@ def _evaluate_weight_tuple_with_momentum(
     weights: tuple[float, float, float],
     momentum_definition: str,
     reversal_filter_params=None,
+    engine="backtrader",
 ) -> dict[str, object]:
     if momentum_definition != "90d":
         return evaluate_weight_tuple(
@@ -233,6 +234,7 @@ def _evaluate_weight_tuple_with_momentum(
             weights,
             momentum_definition=momentum_definition,
             reversal_filter_params=reversal_filter_params,
+            engine=engine,
         )
 
     try:
@@ -243,6 +245,7 @@ def _evaluate_weight_tuple_with_momentum(
             weights,
             momentum_definition=momentum_definition,
             reversal_filter_params=reversal_filter_params,
+            engine=engine,
         )
     except TypeError as exc:
         if "momentum_definition" not in str(exc):
@@ -277,6 +280,7 @@ def evaluate_weight_tuple(
     evaluation_start: str | None = None,
     evaluation_end: str | None = None,
     reversal_filter_params=None,
+    engine="backtrader",
 ) -> dict[str, float]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -319,6 +323,23 @@ def evaluate_weight_tuple(
         from src.research.reversal_filter import apply_reversal_filter
         result = apply_reversal_filter(scores, window_dfs, reversal_filter_params)
         scores = result["filtered_scores"]
+
+    if engine == "vectorbt":
+        from src.engine.vectorbt_runner import run_backtest_vectorbt
+        return run_backtest_vectorbt(
+            data_dfs=window_dfs,
+            start=start,
+            end=end,
+            weights=weights,
+            top_n=3,
+            initial_cash=STARTING_CASH,
+            commission_rate=0.001,
+            slippage_pct=0.0005,
+            momentum_definition=momentum_definition,
+            reversal_filter_params=reversal_filter_params,
+            evaluation_start=eval_start,
+            evaluation_end=eval_end,
+        )
 
     strategy_class = _build_execution_strategy_class(momentum_definition)
     suppress_output(strategy_class)
@@ -417,6 +438,7 @@ def run_walk_forward_optimization(
     local_warmup_bars: int | None = None,
     local_allowed_validation_statuses: tuple[str, ...] = ("ok",),
     reversal_filter_params=None,
+    engine="backtrader",
 ) -> dict[str, object]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -502,6 +524,7 @@ def run_walk_forward_optimization(
                 evaluation_start=window["train_start"],
                 evaluation_end=window["train_end"],
                 reversal_filter_params=reversal_filter_params,
+                engine=engine,
             )
 
         def evaluate_validation_window(window, weights):
@@ -518,6 +541,7 @@ def run_walk_forward_optimization(
                 momentum_definition=momentum_definition,
                 evaluation_start=window["validation_start"],
                 evaluation_end=window["validation_end"],
+                engine=engine,
             )
             metrics = metrics | _build_validation_participation_metrics(
                 data_dfs=window_dfs,
@@ -542,6 +566,7 @@ def run_walk_forward_optimization(
                 evaluation_start=window["validation_start"],
                 evaluation_end=window["validation_end"],
                 reversal_filter_params=reversal_filter_params,
+                engine=engine,
             )
 
         def evaluate_one_shot_training_window(weights):
@@ -555,6 +580,7 @@ def run_walk_forward_optimization(
                 evaluation_start=start,
                 evaluation_end=end,
                 reversal_filter_params=reversal_filter_params,
+                engine=engine,
             )
 
         def evaluate_one_shot_validation_window(window, weights):
@@ -572,6 +598,7 @@ def run_walk_forward_optimization(
                 evaluation_start=window["validation_start"],
                 evaluation_end=window["validation_end"],
                 reversal_filter_params=reversal_filter_params,
+                engine=engine,
             )
 
     else:
@@ -583,6 +610,7 @@ def run_walk_forward_optimization(
                 weights,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                engine=engine,
             )
 
         def evaluate_validation_window(window, weights):
@@ -593,6 +621,7 @@ def run_walk_forward_optimization(
                 weights,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                engine=engine,
             ) | _build_validation_participation_metrics(
                 data_dfs=data_dfs,
                 universe_symbols=universe_symbols,
@@ -608,6 +637,7 @@ def run_walk_forward_optimization(
                 DEFAULT_BASELINE_WEIGHTS,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                engine=engine,
             )
 
         def evaluate_one_shot_training_window(weights):
@@ -618,6 +648,7 @@ def run_walk_forward_optimization(
                 weights,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                engine=engine,
             )
 
         def evaluate_one_shot_validation_window(window, weights):
@@ -628,6 +659,7 @@ def run_walk_forward_optimization(
                 weights,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                engine=engine,
             )
 
     result = run_walk_forward_experiment(
@@ -760,6 +792,10 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0.10,
         help="Reversal filter drawdown threshold (default: 0.10)",
     )
+    parser.add_argument("--engine", choices=["backtrader", "vectorbt"], default="backtrader",
+                        help="Backtesting engine (default: backtrader)")
+    parser.add_argument("--fast", action="store_true",
+                        help="Alias for --engine vectorbt")
     return parser
 
 
@@ -808,6 +844,8 @@ def main(argv: list[str] | None = None) -> int:
             threshold=args.reversal_threshold,
         )
 
+    engine = "vectorbt" if args.fast else args.engine
+
     try:
         run_walk_forward_optimization(
             data_dfs=data_dfs,
@@ -828,6 +866,7 @@ def main(argv: list[str] | None = None) -> int:
             local_store_root=args.local_store_root,
             local_warmup_bars=args.local_warmup_bars,
             reversal_filter_params=reversal_filter_params,
+            engine=engine,
         )
     except local_store.LocalDataSyncRequiredError as exc:
         print(f"Local data sync required: {exc}")

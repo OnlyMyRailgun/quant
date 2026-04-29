@@ -244,6 +244,10 @@ def main():
     parser.add_argument("--start", type=str, default="2023-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default="2024-01-01", help="End date (YYYY-MM-DD)")
     parser.add_argument("--no-plot", action="store_true", help="Disable plotting (useful for CI)")
+    parser.add_argument("--engine", choices=["backtrader", "vectorbt"], default="backtrader")
+    parser.add_argument("--fast", action="store_true", help="Alias for --engine vectorbt")
+    parser.add_argument("--momentum-definition", choices=["90d", "12_1"], default="90d",
+                        help="Momentum definition for backtest (default: 90d)")
     parser.add_argument(
         "--reversal-filter",
         action="store_true",
