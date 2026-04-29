@@ -164,6 +164,19 @@ def generate_rebalance_orders(
     from src.data.universe import get_universe
     from src.data.bulk_loader import fetch_universe
 
+    # Monthly guard: skip if already rebalanced this month
+    today = pd.Timestamp.today()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT MAX(date) FROM orders WHERE status='FILLED'")
+    row = cur.fetchone()
+    conn.close()
+    if row and row[0]:
+        last_date = pd.Timestamp(row[0])
+        if last_date.year == today.year and last_date.month == today.month:
+            print(f"Already rebalanced this month (last fill: {row[0]}). Skipping.")
+            return
+
     symbols = get_universe(universe_name)
 
     print(f"Fetching latest data for {len(symbols)} symbols ({universe_name})...")
