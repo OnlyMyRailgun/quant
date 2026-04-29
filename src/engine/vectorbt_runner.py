@@ -75,22 +75,24 @@ def run_backtest_vectorbt(
     weight_mom, weight_vol, weight_rev = weights
 
     # ------------------------------------------------------------------
-    # 2. Generate month-start rebalance dates
-    #    Using BMS (Business Month Start) to match backtrader behavior,
-    #    which rebalances on the first trading day of each month.
+    # 2. Generate execution dates (month-start = BMS)
+    #    Score using data available at the END of the prior month,
+    #    then execute at the first trading day of the new month.
+    #    This matches real-world: you score after market close on the
+    #    last day of month N, then trade on the first day of month N+1.
     # ------------------------------------------------------------------
-    rebalance_dates = pd.date_range(start, end, freq="BMS")
+    exec_dates = pd.date_range(start, end, freq="BMS")
 
     # ------------------------------------------------------------------
     # 3. Per-date scoring loop
     # ------------------------------------------------------------------
     period_scores: dict[pd.Timestamp, pd.DataFrame] = {}
 
-    for date in rebalance_dates:
-        # a. Slice data_dfs to only include data up to this date
+    for exec_date in exec_dates:
+        # a. Score using data strictly BEFORE the execution date
         period_data: dict[str, pd.DataFrame] = {}
         for sym, df in data_dfs.items():
-            sliced = df.loc[df.index <= date]
+            sliced = df.loc[df.index < exec_date]
             if not sliced.empty:
                 period_data[sym] = sliced
 
@@ -137,7 +139,7 @@ def run_backtest_vectorbt(
             )
             scored = filtered_result["filtered_scores"]
 
-        period_scores[date] = scored
+        period_scores[exec_date] = scored
 
     # Edge case: no periods scored
     if not period_scores:
