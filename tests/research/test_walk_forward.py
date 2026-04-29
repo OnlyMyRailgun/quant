@@ -55,46 +55,46 @@ def test_build_walk_forward_windows_returns_empty_when_range_is_too_short():
 
 def test_select_best_weights_picks_highest_sharpe_weight_tuple():
     leaderboard = select_best_weights(
-        weight_grid=[(0.0, 0.0, 1.0), (1.0, 0.5, 0.0), (1.0, 1.0, 1.0)],
+        weight_grid=[(0.0, 0.0, 1.0, 0.0), (1.0, 0.5, 0.0, 0.0), (1.0, 1.0, 1.0, 0.0)],
         evaluate=lambda weights: {
-            (0.0, 0.0, 1.0): {"return_pct": 1.0, "sharpe": 0.1},
-            (1.0, 0.5, 0.0): {"return_pct": 4.0, "sharpe": 0.2},
-            (1.0, 1.0, 1.0): {"return_pct": 3.0, "sharpe": 0.5},
+            (0.0, 0.0, 1.0, 0.0): {"return_pct": 1.0, "sharpe": 0.1},
+            (1.0, 0.5, 0.0, 0.0): {"return_pct": 4.0, "sharpe": 0.2},
+            (1.0, 1.0, 1.0, 0.0): {"return_pct": 3.0, "sharpe": 0.5},
         }[weights],
     )
 
-    assert leaderboard["best"]["weights"] == {"mom": 1.0, "vol": 1.0, "rev": 1.0}
+    assert leaderboard["best"]["weights"] == {"mom": 1.0, "vol": 1.0, "rev": 1.0, "val": 0.0}
     assert leaderboard["rows"][0]["sharpe"] == 0.5
 
 
 def test_select_best_weights_prefers_higher_sharpe_over_higher_return():
     leaderboard = select_best_weights(
-        weight_grid=[(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        weight_grid=[(1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0)],
         evaluate=lambda weights: {
-            (1.0, 0.0, 0.0): {"return_pct": 6.0, "sharpe": 0.2},
-            (0.0, 1.0, 0.0): {"return_pct": 4.0, "sharpe": 0.6},
+            (1.0, 0.0, 0.0, 0.0): {"return_pct": 6.0, "sharpe": 0.2},
+            (0.0, 1.0, 0.0, 0.0): {"return_pct": 4.0, "sharpe": 0.6},
         }[weights],
     )
 
-    assert leaderboard["best"]["weights"] == {"mom": 0.0, "vol": 1.0, "rev": 0.0}
+    assert leaderboard["best"]["weights"] == {"mom": 0.0, "vol": 1.0, "rev": 0.0, "val": 0.0}
     assert leaderboard["rows"][0]["sharpe"] == 0.6
 
 
 def test_select_best_weights_uses_return_pct_when_sharpe_is_tied():
     leaderboard = select_best_weights(
-        weight_grid=[(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        weight_grid=[(1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0)],
         evaluate=lambda weights: {
-            (1.0, 0.0, 0.0): {"return_pct": 5.0, "sharpe": 0.5},
-            (0.0, 1.0, 0.0): {"return_pct": 3.0, "sharpe": 0.5},
+            (1.0, 0.0, 0.0, 0.0): {"return_pct": 5.0, "sharpe": 0.5},
+            (0.0, 1.0, 0.0, 0.0): {"return_pct": 3.0, "sharpe": 0.5},
         }[weights],
     )
 
-    assert leaderboard["best"]["weights"] == {"mom": 1.0, "vol": 0.0, "rev": 0.0}
+    assert leaderboard["best"]["weights"] == {"mom": 1.0, "vol": 0.0, "rev": 0.0, "val": 0.0}
     assert leaderboard["rows"][0]["return_pct"] == 5.0
 
 
 def test_default_weight_grid_excludes_all_zero_tuple():
-    assert (0.0, 0.0, 0.0) not in optimize.DEFAULT_WEIGHT_GRID
+    assert (0.0, 0.0, 0.0, 0.0) not in optimize.DEFAULT_WEIGHT_GRID
 
 
 def test_write_walk_forward_run_persists_weights_and_summary(tmp_path: Path):
@@ -273,14 +273,14 @@ def test_evaluate_weight_tuple_uses_research_momentum_definition_in_execution(mo
         data_dfs=data_dfs,
         start="2021-01-01",
         end=index[-1].strftime("%Y-%m-%d"),
-        weights=(1.0, 0.0, 0.0),
+        weights=(1.0, 0.0, 0.0, 0.0),
         momentum_definition="90d",
     )
     metrics_12_1 = optimize.evaluate_weight_tuple(
         data_dfs=data_dfs,
         start="2021-01-01",
         end=index[-1].strftime("%Y-%m-%d"),
-        weights=(1.0, 0.0, 0.0),
+        weights=(1.0, 0.0, 0.0, 0.0),
         momentum_definition="12_1",
     )
 
@@ -288,16 +288,16 @@ def test_evaluate_weight_tuple_uses_research_momentum_definition_in_execution(mo
 
 
 def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
-    weight_grid = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
-    one_shot_weights = (0.0, 1.0, 0.0)
+    weight_grid = [(1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0)]
+    one_shot_weights = (0.0, 1.0, 0.0, 0.0)
     training_scores = {
-        ("2021-01-01", "2021-06-30", (1.0, 0.0, 0.0)): {"return_pct": 5.0, "sharpe": 0.5},
-        ("2021-01-01", "2021-06-30", (0.0, 1.0, 0.0)): {"return_pct": 3.0, "sharpe": 0.2},
-        ("2021-04-01", "2021-09-30", (1.0, 0.0, 0.0)): {"return_pct": 2.0, "sharpe": 0.1},
-        ("2021-04-01", "2021-09-30", (0.0, 1.0, 0.0)): {"return_pct": 4.0, "sharpe": 0.3},
+        ("2021-01-01", "2021-06-30", (1.0, 0.0, 0.0, 0.0)): {"return_pct": 5.0, "sharpe": 0.5},
+        ("2021-01-01", "2021-06-30", (0.0, 1.0, 0.0, 0.0)): {"return_pct": 3.0, "sharpe": 0.2},
+        ("2021-04-01", "2021-09-30", (1.0, 0.0, 0.0, 0.0)): {"return_pct": 2.0, "sharpe": 0.1},
+        ("2021-04-01", "2021-09-30", (0.0, 1.0, 0.0, 0.0)): {"return_pct": 4.0, "sharpe": 0.3},
     }
     validation_scores = {
-        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 1.5,
             "sharpe": 0.15,
             "symbol_returns": [
@@ -305,7 +305,7 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
                 {"symbol": "BBB.T", "return_pct": -0.5},
             ],
         },
-        ("2021-10-01", "2021-12-31", (0.0, 1.0, 0.0)): {
+        ("2021-10-01", "2021-12-31", (0.0, 1.0, 0.0, 0.0)): {
             "return_pct": 2.5,
             "sharpe": 0.25,
             "symbol_returns": [
@@ -319,8 +319,8 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
         ("2021-10-01", "2021-12-31"): {"return_pct": 1.2, "sharpe": 0.12},
     }
     one_shot_training_scores = {
-        ("2021-01-01", "2021-06-30", (1.0, 0.0, 0.0)): {"return_pct": 2.0, "sharpe": 0.2},
-        ("2021-01-01", "2021-06-30", (0.0, 1.0, 0.0)): {"return_pct": 3.5, "sharpe": 0.35},
+        ("2021-01-01", "2021-06-30", (1.0, 0.0, 0.0, 0.0)): {"return_pct": 2.0, "sharpe": 0.2},
+        ("2021-01-01", "2021-06-30", (0.0, 1.0, 0.0, 0.0)): {"return_pct": 3.5, "sharpe": 0.35},
     }
     one_shot_validation_scores = {
         ("2021-07-01", "2021-09-30", one_shot_weights): {"return_pct": 1.8, "sharpe": 0.18},
@@ -420,9 +420,9 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
 
 
 def test_run_walk_forward_experiment_aggregates_summary_contributors_from_full_symbol_returns():
-    weight_grid = [(1.0, 0.0, 0.0)]
+    weight_grid = [(1.0, 0.0, 0.0, 0.0)]
     validation_scores = {
-        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 1.0,
             "sharpe": 0.1,
             "symbol_returns": [
@@ -435,7 +435,7 @@ def test_run_walk_forward_experiment_aggregates_summary_contributors_from_full_s
                 {"symbol": "GGG.T", "return_pct": 1.0},
             ],
         },
-        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 1.0,
             "sharpe": 0.1,
             "symbol_returns": [
@@ -472,9 +472,9 @@ def test_run_walk_forward_experiment_aggregates_summary_contributors_from_full_s
 
 
 def test_run_walk_forward_experiment_aggregates_universe_participation_summary():
-    weight_grid = [(1.0, 0.0, 0.0)]
+    weight_grid = [(1.0, 0.0, 0.0, 0.0)]
     validation_scores = {
-        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 1.0,
             "sharpe": 0.1,
             "requested_symbol_count": 10,
@@ -482,7 +482,7 @@ def test_run_walk_forward_experiment_aggregates_universe_participation_summary()
             "skipped_symbol_count": 2,
             "coverage_ratio": 0.8,
         },
-        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 2.0,
             "sharpe": 0.2,
             "requested_symbol_count": 10,
@@ -515,9 +515,9 @@ def test_run_walk_forward_experiment_aggregates_universe_participation_summary()
 
 
 def test_run_walk_forward_experiment_threads_universe_participation_fields_into_rows():
-    weight_grid = [(1.0, 0.0, 0.0)]
+    weight_grid = [(1.0, 0.0, 0.0, 0.0)]
     validation_scores = {
-        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 1.0,
             "sharpe": 0.1,
             "requested_symbol_count": 10,
@@ -525,7 +525,7 @@ def test_run_walk_forward_experiment_threads_universe_participation_fields_into_
             "skipped_symbol_count": 2,
             "coverage_ratio": 0.8,
         },
-        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 2.0,
             "sharpe": 0.2,
             "requested_symbol_count": 10,
@@ -556,13 +556,13 @@ def test_run_walk_forward_experiment_threads_universe_participation_fields_into_
 
 
 def test_run_walk_forward_experiment_omits_universe_participation_summary_when_not_provided():
-    weight_grid = [(1.0, 0.0, 0.0)]
+    weight_grid = [(1.0, 0.0, 0.0, 0.0)]
     validation_scores = {
-        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 1.0,
             "sharpe": 0.1,
         },
-        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 2.0,
             "sharpe": 0.2,
         },
@@ -593,13 +593,13 @@ def test_run_walk_forward_experiment_omits_universe_participation_summary_when_n
 
 
 def test_run_walk_forward_experiment_omits_universe_participation_row_columns_when_not_provided():
-    weight_grid = [(1.0, 0.0, 0.0)]
+    weight_grid = [(1.0, 0.0, 0.0, 0.0)]
     validation_scores = {
-        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0)): {
+        ("2021-07-01", "2021-09-30", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 1.0,
             "sharpe": 0.1,
         },
-        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0)): {
+        ("2021-10-01", "2021-12-31", (1.0, 0.0, 0.0, 0.0)): {
             "return_pct": 2.0,
             "sharpe": 0.2,
         },
@@ -771,7 +771,7 @@ def test_run_walk_forward_optimization_computes_partial_universe_coverage(monkey
                 "validation_start": "2021-07-01",
                 "validation_end": "2021-09-30",
             },
-            (1.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0, 0.0),
         )
         return {
             "weights": pd.DataFrame(),
@@ -816,22 +816,22 @@ def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator
     def fake_evaluate_weight_tuple(data_dfs, start, end, weights, **kwargs):
         del data_dfs
         if (start, end) == ("2021-01-01", "2021-12-31"):
-            if weights == (1.0, 0.0, 0.0):
+            if weights == (1.0, 0.0, 0.0, 0.0):
                 return {"return_pct": 2.0, "sharpe": 0.2, "drawdown": 1.0}
             return {"return_pct": 3.0, "sharpe": 0.3, "drawdown": 1.0}
         if (start, end) == ("2021-01-01", "2021-06-30"):
-            if weights == (1.0, 0.0, 0.0):
+            if weights == (1.0, 0.0, 0.0, 0.0):
                 return {"return_pct": 5.0, "sharpe": 0.5, "drawdown": 1.0}
             return {"return_pct": 3.0, "sharpe": 0.3, "drawdown": 1.0}
         if (start, end) == ("2021-07-01", "2021-12-31"):
-            if weights == (1.0, 0.0, 0.0):
+            if weights == (1.0, 0.0, 0.0, 0.0):
                 return {"return_pct": 1.8, "sharpe": 0.18, "drawdown": 1.0}
             if weights == (1.0, 1.0, 1.0):
                 return {"return_pct": 1.0, "sharpe": 0.1, "drawdown": 1.0}
             return {"return_pct": 1.4, "sharpe": 0.14, "drawdown": 1.0}
         raise AssertionError(f"Unexpected window: {(start, end, weights)}")
 
-    monkeypatch.setattr(optimize, "DEFAULT_WEIGHT_GRID", [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)])
+    monkeypatch.setattr(optimize, "DEFAULT_WEIGHT_GRID", [(1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0)])
     monkeypatch.setattr(optimize, "DEFAULT_BASELINE_WEIGHTS", (1.0, 1.0, 1.0))
     monkeypatch.setattr(optimize, "evaluate_weight_tuple", fake_evaluate_weight_tuple)
 
@@ -1143,7 +1143,7 @@ def test_run_walk_forward_experiment_records_momentum_definition_in_metadata():
         train_months=6,
         validation_months=6,
         step_months=6,
-        weight_grid=[(1.0, 0.0, 0.0)],
+        weight_grid=[(1.0, 0.0, 0.0, 0.0)],
         evaluate_training_window=lambda window, weights: {"return_pct": 1.0, "sharpe": 0.1},
         evaluate_validation_window=lambda window, weights: {"return_pct": 1.1, "sharpe": 0.1},
         evaluate_baseline_window=lambda window: {"return_pct": 0.9, "sharpe": 0.1},
@@ -1531,7 +1531,7 @@ def test_run_walk_forward_optimization_accepts_12_1_momentum_override(monkeypatc
                 "validation_start": "2021-07-01",
                 "validation_end": "2021-12-31",
             },
-            (1.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0, 0.0),
         )
         return {
             "weights": pd.DataFrame(),

@@ -37,7 +37,7 @@ def run_backtest_simple(
     evaluation_start: str | None = None,
     evaluation_end: str | None = None,
 ) -> dict:
-    w_mom, w_vol, w_rev = weights
+    w_mom, w_vol, w_rev = weights[:3]\n    w_val = weights[3] if len(weights) > 3 else 0.0
 
     if momentum_definition == "12_1":
         lookback = 252

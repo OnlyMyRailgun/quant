@@ -222,20 +222,23 @@ def build_walk_forward_windows(
 
 
 def select_best_weights(
-    weight_grid: list[tuple[float, float, float]],
+    weight_grid: list[tuple[float, ...]],
     evaluate,
 ) -> dict[str, object]:
     rows: list[dict[str, object]] = []
 
-    for weight_mom, weight_vol, weight_rev in weight_grid:
-        metrics = evaluate((weight_mom, weight_vol, weight_rev))
+    for weights in weight_grid:
+        metrics = evaluate(weights)
+        weight_dict = {
+            "mom": weights[0],
+            "vol": weights[1],
+            "rev": weights[2],
+        }
+        if len(weights) > 3:
+            weight_dict["val"] = weights[3]
         rows.append(
             {
-                "weights": {
-                    "mom": weight_mom,
-                    "vol": weight_vol,
-                    "rev": weight_rev,
-                },
+                "weights": weight_dict,
                 "return_pct": float(metrics["return_pct"]),
                 "sharpe": float(metrics.get("sharpe", 0.0)),
             }
@@ -244,16 +247,7 @@ def select_best_weights(
     if not rows:
         raise ValueError("weight_grid must not be empty")
 
-    rows.sort(
-        key=lambda row: (
-            row["sharpe"],
-            row["return_pct"],
-            row["weights"]["mom"],
-            row["weights"]["vol"],
-            row["weights"]["rev"],
-        ),
-        reverse=True,
-    )
+    rows.sort(key=lambda row: (row["sharpe"], row["return_pct"]), reverse=True)
     return {"best": rows[0], "rows": rows}
 
 
@@ -309,6 +303,7 @@ def run_walk_forward_experiment(
             best_weights["mom"],
             best_weights["vol"],
             best_weights["rev"],
+            best_weights.get("val", 0.0),
         )
         validation_metrics = evaluate_validation_window(window, weight_tuple)
         baseline_metrics = evaluate_baseline_window(window)
@@ -326,6 +321,7 @@ def run_walk_forward_experiment(
                 one_shot_best_weights["mom"],
                 one_shot_best_weights["vol"],
                 one_shot_best_weights["rev"],
+                one_shot_best_weights.get("val", 0.0),
             )
             one_shot_metrics = evaluate_one_shot_validation_window(
                 window,

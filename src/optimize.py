@@ -29,11 +29,11 @@ from src.strategies.multi_factor import UniversalMultiFactor
 
 
 STARTING_CASH = 1_000_000.0
-DEFAULT_BASELINE_WEIGHTS = (1.0, 1.0, 1.0)
+DEFAULT_BASELINE_WEIGHTS = (1.0, 1.0, 1.0, 0.0)
 DEFAULT_WEIGHT_GRID = [
     weights
-    for weights in product((0.0, 0.5, 1.0), repeat=3)
-    if weights != (0.0, 0.0, 0.0)
+    for weights in product((0.0, 0.5, 1.0), repeat=4)
+    if any(w != 0.0 for w in weights)
 ]
 DEFAULT_OPTIMIZE_START = "2021-01-01"
 DEFAULT_OPTIMIZE_END = "2024-01-01"
@@ -287,6 +287,8 @@ def evaluate_weight_tuple(
     eval_start = evaluation_start or start
     eval_end = evaluation_end or end
 
+    w_val = weights[3] if len(weights) > 3 else 0.0
+
     warmup_bars = max(DEFAULT_LOOKBACK_MOM, DEFAULT_LOOKBACK_VOL, DEFAULT_LOOKBACK_REV)
     window_dfs = _slice_window_data(data_dfs, start, end, warmup_bars=warmup_bars)
     if not window_dfs:
@@ -295,6 +297,7 @@ def evaluate_weight_tuple(
             weight_mom=weights[0],
             weight_vol=weights[1],
             weight_rev=weights[2],
+            weight_val=w_val,
         )
         return {
             "return_pct": 0.0,
@@ -309,6 +312,7 @@ def evaluate_weight_tuple(
             weight_mom=weights[0],
             weight_vol=weights[1],
             weight_rev=weights[2],
+            weight_val=w_val,
             momentum_definition=momentum_definition,
         )
     else:
@@ -317,6 +321,7 @@ def evaluate_weight_tuple(
             weight_mom=weights[0],
             weight_vol=weights[1],
             weight_rev=weights[2],
+            weight_val=w_val,
         )
 
     if reversal_filter_params is not None:

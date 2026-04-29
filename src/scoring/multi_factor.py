@@ -79,9 +79,11 @@ def score_universe(
     weight_mom: float = 1.0,
     weight_vol: float = 1.0,
     weight_rev: float = 1.0,
+    weight_val: float = 0.0,
     lookback_mom: int = DEFAULT_LOOKBACK_MOM,
     lookback_vol: int = DEFAULT_LOOKBACK_VOL,
     lookback_rev: int = DEFAULT_LOOKBACK_REV,
+    book_values: Mapping[str, float | None] | None = None,
 ) -> pd.DataFrame:
     """
     Score a symbol universe using cross-sectional multi-factor ranking.
@@ -97,6 +99,8 @@ def score_universe(
     raw_mom: list[float] = []
     raw_vol: list[float] = []
     raw_rev: list[float] = []
+    raw_val: list[float] = []
+    use_value = book_values is not None and weight_val > 0.0
 
     for symbol, df in data_dfs.items():
         if df is None or df.empty:
@@ -114,31 +118,39 @@ def score_universe(
         factors = _compute_factors(close, lookback_mom, lookback_vol, lookback_rev)
         if not _has_only_finite_factors(factors):
             continue
+
+        if use_value:
+            bv = book_values.get(symbol)
+            if bv is not None and bv > 0:
+                pb_raw = factors["price"] / bv
+            else:
+                pb_raw = math.nan
+            factors["val_raw"] = pb_raw
+            raw_val.append(pb_raw)
+
         raw_mom.append(factors["mom_raw"])
         raw_vol.append(factors["vol_raw"])
         raw_rev.append(factors["rev_raw"])
         records.append({"symbol": symbol, **factors})
 
     if not records:
-        return pd.DataFrame(
-            columns=[
-                "symbol",
-                "price",
-                "mom_raw",
-                "vol_raw",
-                "rev_raw",
-                "mom_z",
-                "vol_z",
-                "rev_z",
-                "total_score",
-                "rank",
-                "is_top_n",
-            ]
-        )
+        cols = [
+            "symbol", "price",
+            "mom_raw", "vol_raw", "rev_raw",
+            "mom_z", "vol_z", "rev_z",
+            "mom_contribution", "vol_contribution", "rev_contribution",
+            "total_score", "rank", "is_top_n",
+        ]
+        if use_value:
+            cols.insert(cols.index("rev_raw") + 1, "val_raw")
+            cols.insert(cols.index("rev_z") + 1, "val_z")
+            cols.insert(cols.index("rev_contribution") + 1, "val_contribution")
+        return pd.DataFrame(columns=cols)
 
     mom_z = _safe_zscores(raw_mom, invert=False)
     vol_z = _safe_zscores(raw_vol, invert=True)
     rev_z = _safe_zscores(raw_rev, invert=True)
+    val_z = _safe_zscores(raw_val, invert=True) if use_value else [0.0] * len(records)
 
     for i, record in enumerate(records):
         record["mom_z"] = mom_z[i]
@@ -147,11 +159,12 @@ def score_universe(
         record["mom_contribution"] = weight_mom * mom_z[i]
         record["vol_contribution"] = weight_vol * vol_z[i]
         record["rev_contribution"] = weight_rev * rev_z[i]
-        record["total_score"] = (
-            record["mom_contribution"]
-            + record["vol_contribution"]
-            + record["rev_contribution"]
-        )
+        total = record["mom_contribution"] + record["vol_contribution"] + record["rev_contribution"]
+        if use_value:
+            record["val_z"] = val_z[i]
+            record["val_contribution"] = weight_val * val_z[i]
+            total += record["val_contribution"]
+        record["total_score"] = total
 
     ranked = pd.DataFrame(records)
     ranked = ranked.sort_values(by="total_score", ascending=False, kind="mergesort")
