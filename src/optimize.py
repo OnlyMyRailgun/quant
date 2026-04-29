@@ -462,6 +462,8 @@ def run_walk_forward_optimization(
     reversal_filter_params=None,
     engine="simple",
     book_values: dict[str, float | None] | None = None,
+    optimizer: str = "grid",
+    n_factors: int = 4,
 ) -> dict[str, object]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -548,6 +550,7 @@ def run_walk_forward_optimization(
                 evaluation_end=window["train_end"],
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
+                book_values=book_values,
             )
 
         def evaluate_validation_window(window, weights):
@@ -565,6 +568,7 @@ def run_walk_forward_optimization(
                 evaluation_start=window["validation_start"],
                 evaluation_end=window["validation_end"],
                 engine=engine,
+                book_values=book_values,
             )
             metrics = metrics | _build_validation_participation_metrics(
                 data_dfs=window_dfs,
@@ -633,6 +637,7 @@ def run_walk_forward_optimization(
                 weights,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                book_values=book_values,
                 engine=engine,
             )
 
@@ -644,6 +649,7 @@ def run_walk_forward_optimization(
                 weights,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                book_values=book_values,
                 engine=engine,
             ) | _build_validation_participation_metrics(
                 data_dfs=data_dfs,
@@ -660,6 +666,7 @@ def run_walk_forward_optimization(
                 DEFAULT_BASELINE_WEIGHTS,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                book_values=book_values,
                 engine=engine,
             )
 
@@ -671,6 +678,7 @@ def run_walk_forward_optimization(
                 weights,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                book_values=book_values,
                 engine=engine,
             )
 
@@ -682,6 +690,7 @@ def run_walk_forward_optimization(
                 weights,
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
+                book_values=book_values,
                 engine=engine,
             )
 
@@ -691,7 +700,7 @@ def run_walk_forward_optimization(
         train_months=train_months,
         validation_months=validation_months,
         step_months=step_months,
-        weight_grid=DEFAULT_WEIGHT_GRID,
+        weight_grid=DEFAULT_WEIGHT_GRID if optimizer == "grid" else None,
         evaluate_training_window=evaluate_training_window,
         evaluate_validation_window=evaluate_validation_window,
         evaluate_baseline_window=evaluate_baseline_window,
@@ -700,6 +709,8 @@ def run_walk_forward_optimization(
         evaluate_benchmark_windows=benchmark_evaluators,
         artifact_dir=None,
         momentum_definition=momentum_definition,
+        optimizer=optimizer,
+        n_factors=n_factors,
     )
 
     weights = result["weights"]
@@ -816,9 +827,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Reversal filter drawdown threshold (default: 0.10)",
     )
     parser.add_argument("--engine", choices=["simple", "backtrader", "vectorbt"], default="simple",
-                        help="Backtesting engine (default: backtrader)")
+                        help="Backtesting engine")
     parser.add_argument("--fast", action="store_true",
                         help="Alias for --engine vectorbt")
+    parser.add_argument("--optimizer", choices=["grid", "optuna"], default="grid",
+                        help="Weight optimization method (default: grid)")
+    parser.add_argument("--optuna-trials", type=int, default=50,
+                        help="Number of Optuna trials per window (default: 50)")
     return parser
 
 
@@ -895,6 +910,8 @@ def main(argv: list[str] | None = None) -> int:
             reversal_filter_params=reversal_filter_params,
             engine=engine,
             book_values=book_values,
+            optimizer=args.optimizer,
+            n_factors=4,
         )
     except local_store.LocalDataSyncRequiredError as exc:
         print(f"Local data sync required: {exc}")

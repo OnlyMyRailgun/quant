@@ -251,21 +251,82 @@ def select_best_weights(
     return {"best": rows[0], "rows": rows}
 
 
+def select_best_weights_optuna(
+    evaluate,
+    n_factors: int = 4,
+    n_trials: int = 50,
+) -> dict[str, object]:
+    """Use Optuna to find optimal continuous factor weights.
+
+    Args:
+        evaluate: Callable that takes a weight tuple and returns metrics dict
+                  with keys "return_pct" and "sharpe".
+        n_factors: Number of factor weights to optimize (3 or 4).
+        n_trials: Number of Optuna trials per optimization.
+
+    Returns:
+        Same shape as select_best_weights: {"best": {"weights": {...}, ...}, "rows": [...]}
+    """
+    import optuna
+
+    DISCRETE_LEVELS = [0.0, 0.5, 1.0]
+
+    def objective(trial):
+        w = tuple(
+            trial.suggest_categorical(f"w{i}", DISCRETE_LEVELS)
+            for i in range(n_factors)
+        )
+        if all(wi == 0.0 for wi in w):
+            return -999.0  # reject all-zero
+        metrics = evaluate(w)
+        return float(metrics.get("sharpe", 0.0))
+
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=42),
+    )
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    study.optimize(objective, n_trials=n_trials)
+
+    best_weights = study.best_params
+    best_tuple = tuple(best_weights[f"w{i}"] for i in range(n_factors))
+    best_metrics = evaluate(best_tuple)
+
+    weight_dict = {
+        "mom": best_weights.get("w0", 0.0),
+        "vol": best_weights.get("w1", 0.0),
+        "rev": best_weights.get("w2", 0.0),
+    }
+    if n_factors > 3:
+        weight_dict["val"] = best_weights.get("w3", 0.0)
+
+    rows = [
+        {
+            "weights": weight_dict,
+            "return_pct": float(best_metrics["return_pct"]),
+            "sharpe": float(best_metrics.get("sharpe", 0.0)),
+        }
+    ]
+    return {"best": rows[0], "rows": rows}
+
+
 def run_walk_forward_experiment(
     start: str,
     end: str,
     train_months: int,
     validation_months: int,
     step_months: int,
-    weight_grid: list[tuple[float, float, float]],
-    evaluate_training_window,
-    evaluate_validation_window,
-    evaluate_baseline_window,
+    weight_grid: list[tuple[float, ...]] | None = None,
+    evaluate_training_window=None,
+    evaluate_validation_window=None,
+    evaluate_baseline_window=None,
     evaluate_one_shot_training_window=None,
     evaluate_one_shot_validation_window=None,
     evaluate_benchmark_windows=None,
     artifact_dir=None,
     momentum_definition: str = "90d",
+    optimizer: str = "grid",
+    n_factors: int = 4,
 ) -> dict[str, object]:
     windows = build_walk_forward_windows(
         start=start,
@@ -286,16 +347,19 @@ def run_walk_forward_experiment(
     window_symbol_returns: list[object] = []
     window_participation_metrics: list[dict[str, object]] = []
 
+    if optimizer == "optuna":
+        _select = lambda evaluate: select_best_weights_optuna(evaluate, n_factors=n_factors)
+    else:
+        if weight_grid is None:
+            raise ValueError("weight_grid is required when optimizer='grid'")
+        _select = lambda evaluate: select_best_weights(weight_grid, evaluate)
+
     if evaluate_one_shot_training_window is not None:
-        one_shot_leaderboard = select_best_weights(
-            weight_grid=weight_grid,
-            evaluate=evaluate_one_shot_training_window,
-        )
+        one_shot_leaderboard = _select(evaluate=evaluate_one_shot_training_window)
         one_shot_best_weights = one_shot_leaderboard["best"]["weights"]
 
     for window in windows:
-        leaderboard = select_best_weights(
-            weight_grid=weight_grid,
+        leaderboard = _select(
             evaluate=lambda weights: evaluate_training_window(window, weights),
         )
         best_weights = leaderboard["best"]["weights"]
