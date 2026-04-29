@@ -35,7 +35,6 @@ class UniversalMultiFactor(bt.Strategy):
         self.rebalance_count = 0
         self.position_change_count = 0
         self.turnover_ratio = 0.0
-        
         self.inds = {d: {} for d in self.datas}
         
         for d in self.datas:

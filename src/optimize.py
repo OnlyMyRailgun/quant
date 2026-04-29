@@ -371,21 +371,23 @@ def evaluate_weight_tuple(
         evaluation_start=eval_start,
         evaluation_end=eval_end,
     )
-    cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe")
+    cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe",
+                        timeframe=bt.TimeFrame.Days,
+                        riskfreerate=0.0,
+                        annualize=True)
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
     cerebro.addanalyzer(SymbolReturnAnalyzer, _name="symbol_returns")
 
     strategy = cerebro.run(runonce=False, preload=True)[0]
-    returns = strategy.analyzers.returns.get_analysis()
     window_return = strategy.analyzers.window_return.get_analysis()
     sharpe = strategy.analyzers.sharpe.get_analysis().get("sharperatio")
     drawdown = strategy.analyzers.drawdown.get_analysis().get("max", {}).get("drawdown", 0.0)
     symbol_returns = strategy.analyzers.symbol_returns.get_analysis().get("symbol_returns", [])
 
-    if eval_start == start and eval_end == end:
-        return_pct = round(returns.get("rtot", 0.0) * 100, 4)
-    else:
-        return_pct = float(window_return.get("return_pct", 0.0))
+    # Use WindowReturnAnalyzer (simple return percentage) in all cases.
+    # Do NOT use bt.analyzers.Returns which returns the natural log of the
+    # return ratio (rtot = ln(V_end/V_start)), not the simple return.
+    return_pct = float(window_return.get("return_pct", 0.0))
 
     return {
         "return_pct": return_pct,

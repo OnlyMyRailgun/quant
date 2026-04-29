@@ -75,9 +75,11 @@ def run_backtest_vectorbt(
     weight_mom, weight_vol, weight_rev = weights
 
     # ------------------------------------------------------------------
-    # 2. Generate month-end rebalance dates
+    # 2. Generate month-start rebalance dates
+    #    Using BMS (Business Month Start) to match backtrader behavior,
+    #    which rebalances on the first trading day of each month.
     # ------------------------------------------------------------------
-    rebalance_dates = pd.date_range(start, end, freq="BME")
+    rebalance_dates = pd.date_range(start, end, freq="BMS")
 
     # ------------------------------------------------------------------
     # 3. Per-date scoring loop
@@ -196,7 +198,6 @@ def run_backtest_vectorbt(
 
     size = pd.DataFrame(np.nan, index=idx, columns=order_symbols)
     price = pd.DataFrame(np.nan, index=idx, columns=order_symbols)
-    fees = pd.DataFrame(0.0, index=idx, columns=order_symbols)
 
     for _, o in orders.iterrows():
         sym = o["symbol"]
@@ -204,17 +205,19 @@ def run_backtest_vectorbt(
         if sym in size.columns and date in size.index:
             size.loc[date, sym] = o["size"]
             price.loc[date, sym] = o["price"]
-            fees.loc[date, sym] = o["fees"]
 
     # ------------------------------------------------------------------
     # 6. Run vectorbt portfolio simulation
+    #    For target-percentage orders, pass commission as scalar rate
+    #    (absolute fees per order would be near-zero decimals that
+    #     vectorbt can't interpret correctly)
     # ------------------------------------------------------------------
     portfolio = vbt.Portfolio.from_orders(
         close=close_prices[order_symbols],
         size=size,
         size_type="targetpercent",
         price=price,
-        fees=fees,
+        fees=commission_rate,
         freq="D",
         cash_sharing=True,
         init_cash=initial_cash,
@@ -225,25 +228,47 @@ def run_backtest_vectorbt(
     # ------------------------------------------------------------------
     # 7. Slice returns to evaluation window (if specified)
     # ------------------------------------------------------------------
-    if evaluation_start is not None and evaluation_end is not None:
-        eval_returns = portfolio.returns().loc[evaluation_start:evaluation_end]
-    else:
-        eval_returns = portfolio.returns()
+    # Use portfolio.total_return() for correct compound return.
+    # Do NOT use portfolio.returns().sum() which gives arithmetic (not
+    # geometric) return.
+    # ------------------------------------------------------------------
+    eval_start = evaluation_start or start
+    eval_end = evaluation_end or end
 
-    # ------------------------------------------------------------------
-    # 8. Extract metrics
-    # ------------------------------------------------------------------
-    if eval_returns.empty:
+    # Compute total return over the evaluation window by slicing value
+    portfolio_value = portfolio.value()
+    if isinstance(portfolio_value, pd.DataFrame):
+        portfolio_value = portfolio_value.iloc[:, 0]
+
+    window_values = portfolio_value.loc[eval_start:eval_end]
+    if window_values.empty or len(window_values) < 2:
         return_pct = 0.0
     else:
-        return_pct = float(eval_returns.sum() * 100)
+        start_val = float(window_values.iloc[0])
+        end_val = float(window_values.iloc[-1])
+        if start_val > 0:
+            return_pct = round(((end_val / start_val) - 1.0) * 100, 4)
+        else:
+            return_pct = 0.0
 
+    # ------------------------------------------------------------------
+    # 8. Compute Sharpe manually to match Backtrader formula:
+    #    mean(daily_returns) / std(ddof=0) * sqrt(252)
+    # ------------------------------------------------------------------
+    daily_returns = portfolio.returns().dropna()
+    if len(daily_returns) > 1 and daily_returns.std(ddof=0) > 0:
+        sharpe = float(daily_returns.mean() / daily_returns.std(ddof=0) * np.sqrt(252))
+    else:
+        sharpe = 0.0
+
+    # ------------------------------------------------------------------
+    # 9. Extract drawdown from portfolio stats
+    # ------------------------------------------------------------------
     stats = portfolio.stats()
-    sharpe = float(stats.get("Sharpe Ratio", 0.0) or 0.0)
     drawdown = float(stats.get("Max Drawdown [%]", 0.0) or 0.0)
 
     # ------------------------------------------------------------------
-    # 9. Symbol-level returns (from positions records)
+    # 10. Symbol-level returns (from positions records)
     # ------------------------------------------------------------------
     symbol_returns: dict[str, float] = {}
     try:
@@ -262,7 +287,7 @@ def run_backtest_vectorbt(
         symbol_returns = {}
 
     # ------------------------------------------------------------------
-    # 10. Return metrics dict
+    # 11. Return metrics dict
     # ------------------------------------------------------------------
     return {
         "return_pct": return_pct,

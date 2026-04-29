@@ -41,8 +41,9 @@ class TestBuildOrders:
         expected_price = 100.0 * (1 - 0.0005)
         assert result["price"].iloc[0] == pytest.approx(expected_price)
 
-        expected_fees = expected_size * expected_price * 0.001
-        assert result["fees"].iloc[0] == pytest.approx(expected_fees)
+        # Fees are 0.0 in build_orders — commission is applied as a scalar
+        # rate in vectorbt's Portfolio.from_orders(fees=commission_rate)
+        assert result["fees"].iloc[0] == 0.0
 
     def test_build_orders_empty_input(self):
         """Empty dict -> empty DataFrame with correct columns."""
