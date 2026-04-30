@@ -283,6 +283,7 @@ def evaluate_weight_tuple(
     reversal_filter_params=None,
     engine="backtrader",
     book_values: dict[str, float | None] | None = None,
+    roe_values: dict[str, float | None] | None = None,
 ) -> dict[str, float]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -290,6 +291,7 @@ def evaluate_weight_tuple(
     eval_end = evaluation_end or end
 
     w_val = weights[3] if len(weights) > 3 else 0.0
+    w_qual = weights[4] if len(weights) > 4 else 0.0
 
     warmup_bars = max(DEFAULT_LOOKBACK_MOM, DEFAULT_LOOKBACK_VOL, DEFAULT_LOOKBACK_REV)
     window_dfs = _slice_window_data(data_dfs, start, end, warmup_bars=warmup_bars)
@@ -299,7 +301,7 @@ def evaluate_weight_tuple(
             weight_mom=weights[0],
             weight_vol=weights[1],
             weight_rev=weights[2],
-            weight_val=w_val,
+            weight_val=w_val, weight_qual=w_qual, roe_values=roe_values,
         )
         return {
             "return_pct": 0.0,
@@ -314,7 +316,7 @@ def evaluate_weight_tuple(
             weight_mom=weights[0],
             weight_vol=weights[1],
             weight_rev=weights[2],
-            weight_val=w_val,
+            weight_val=w_val, weight_qual=w_qual, roe_values=roe_values,
             momentum_definition=momentum_definition,
             book_values=book_values,
         )
@@ -324,7 +326,7 @@ def evaluate_weight_tuple(
             weight_mom=weights[0],
             weight_vol=weights[1],
             weight_rev=weights[2],
-            weight_val=w_val,
+            weight_val=w_val, weight_qual=w_qual, roe_values=roe_values,
             book_values=book_values,
         )
 
@@ -341,7 +343,7 @@ def evaluate_weight_tuple(
             momentum_definition=momentum_definition,
             reversal_filter_params=reversal_filter_params,
             evaluation_start=eval_start, evaluation_end=eval_end,
-            book_values=book_values,
+            book_values=book_values, roe_values=roe_values,
         )
 
     if engine == "vectorbt":
