@@ -71,6 +71,7 @@ def score_research_universe(
     lookback_vol: int = DEFAULT_LOOKBACK_VOL,
     lookback_rev: int = DEFAULT_LOOKBACK_REV,
     book_values: Mapping[str, float | None] | None = None,
+    roe_values: Mapping[str, float | None] | None = None,
 ) -> pd.DataFrame:
     """
     Score a symbol universe using cross-sectional multi-factor ranking with
