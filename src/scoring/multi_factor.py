@@ -40,6 +40,41 @@ def _safe_zscores(values: list[float], invert: bool = False) -> list[float]:
     return [multiplier * ((value - mean) / std) for value in values]
 
 
+def _industry_neutral_zscores(
+    values: list[float],
+    industries: list[str],
+    invert: bool = False,
+) -> list[float]:
+    """Compute z-scores within each industry, then combine.
+
+    For industry groups with only 1 stock, the stock keeps its raw value
+    (no peer comparison available), normalized to the overall cross-section.
+    """
+    if len(values) < 2:
+        return [0.0] * len(values)
+
+    df = pd.DataFrame({"raw": values, "industry": industries})
+    result = [0.0] * len(values)
+    multiplier = -1.0 if invert else 1.0
+
+    for industry, group in df.groupby("industry"):
+        idx = group.index.tolist()
+        group_vals = group["raw"].tolist()
+        if len(group_vals) >= 2:
+            series = pd.Series(group_vals, dtype="float64")
+            std = series.std(ddof=1)
+            if std > 0 and not pd.isna(std):
+                mean = series.mean()
+                for j, i in enumerate(idx):
+                    result[i] = multiplier * ((group_vals[j] - mean) / std)
+                continue
+        # Fallback: single-stock industry → use cross-sectional z-score
+        for j, i in enumerate(idx):
+            result[i] = 0.0  # neutral for single-stock groups
+
+    return result
+
+
 def _compute_factors(
     close: pd.Series,
     lookback_mom: int,
@@ -86,6 +121,7 @@ def score_universe(
     lookback_rev: int = DEFAULT_LOOKBACK_REV,
     book_values: Mapping[str, float | None] | None = None,
     roe_values: Mapping[str, float | None] | None = None,
+    industry_map: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """
     Score a symbol universe using cross-sectional multi-factor ranking.
@@ -160,11 +196,14 @@ def score_universe(
             cols.insert(cols.index("rev_contribution") + 1, "val_contribution")
         return pd.DataFrame(columns=cols)
 
-    mom_z = _safe_zscores(raw_mom, invert=False)
-    vol_z = _safe_zscores(raw_vol, invert=True)
-    rev_z = _safe_zscores(raw_rev, invert=True)
-    val_z = _safe_zscores(raw_val, invert=True) if use_value else [0.0] * len(records)
-    qual_z = _safe_zscores(raw_qual, invert=False) if use_qual else [0.0] * len(records)
+    industries = [industry_map.get(r["symbol"], "Other") for r in records] if industry_map else None
+    _z = (lambda v, invert=False: _industry_neutral_zscores(v, industries, invert)) if industries else _safe_zscores
+
+    mom_z = _z(raw_mom, invert=False)
+    vol_z = _z(raw_vol, invert=True)
+    rev_z = _z(raw_rev, invert=True)
+    val_z = _z(raw_val, invert=True) if use_value else [0.0] * len(records)
+    qual_z = _z(raw_qual, invert=False) if use_qual else [0.0] * len(records)
 
     for i, record in enumerate(records):
         record["mom_z"] = mom_z[i]

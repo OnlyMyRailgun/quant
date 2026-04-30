@@ -38,6 +38,7 @@ def run_backtest_simple(
     evaluation_end: str | None = None,
     book_values: dict[str, float | None] | None = None,
     roe_values: dict[str, float | None] | None = None,
+    industry_map: dict[str, str] | None = None,
 ) -> dict:
     w_mom, w_vol, w_rev = weights[:3]
     w_val = weights[3] if len(weights) > 3 else 0.0
@@ -85,6 +86,7 @@ def run_backtest_simple(
                     window_dfs, top_n=top_n,
                     weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
                     weight_val=w_val, weight_qual=w_qual, book_values=book_values, roe_values=roe_values,
+                    industry_map=industry_map,
                 )
         except ValueError:
             continue
