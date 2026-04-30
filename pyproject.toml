@@ -10,6 +10,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alphalens-reloaded>=0.4.6",
     "backtrader==1.9.78.123",
+    "jquants-api-client>=2.0.1",
     "matplotlib>=3.7.0",
     "optuna>=4.8.0",
     "pandas>=2.0.0",

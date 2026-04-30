@@ -430,6 +430,22 @@ wheels = [
 ]
 
 [[package]]
+name = "jquants-api-client"
+version = "2.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "requests" },
+    { name = "tenacity" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/65/6a/a461b1a75e6e0e2185c3e6ceb42e2931c26109db07f6ae4eba107a908649/jquants_api_client-2.0.1.tar.gz", hash = "sha256:1cabcfbaa366aecf9c6c7cd51a87b99eebf862c5b54d37fdef64c11ead11ff25", size = 41354, upload-time = "2026-03-11T03:25:35.98Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/7c/3428607481bb397448c57273745c151885b2ca3b4b0acdbf24c3aaefaabf/jquants_api_client-2.0.1-py3-none-any.whl", hash = "sha256:409a0ced114c0e9109df650545502e1a0a2fc8fc7bab72633468f548e4fcfdc0", size = 50730, upload-time = "2026-03-11T03:25:37.343Z" },
+]
+
+[[package]]
 name = "jupyterlab-widgets"
 version = "3.0.16"
 source = { registry = "https://pypi.org/simple" }
@@ -907,6 +923,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alphalens-reloaded" },
     { name = "backtrader" },
+    { name = "jquants-api-client" },
     { name = "matplotlib" },
     { name = "optuna" },
     { name = "pandas" },
@@ -925,6 +942,7 @@ dev = [
 requires-dist = [
     { name = "alphalens-reloaded", specifier = ">=0.4.6" },
     { name = "backtrader", specifier = "==1.9.78.123" },
+    { name = "jquants-api-client", specifier = ">=2.0.1" },
     { name = "matplotlib", specifier = ">=3.7.0" },
     { name = "optuna", specifier = ">=4.8.0" },
     { name = "pandas", specifier = ">=2.0.0" },
@@ -1120,6 +1138,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/46/58/8c37dea7bbf769b20d58e7ace7e5edfe65b849442b00ffcdd56be88697c6/tabulate-0.10.0.tar.gz", hash = "sha256:e2cfde8f79420f6deeffdeda9aaec3b6bc5abce947655d17ac662b126e48a60d", size = 91754, upload-time = "2026-03-04T18:55:34.402Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/99/55/db07de81b5c630da5cbf5c7df646580ca26dfaefa593667fc6f2fe016d2e/tabulate-0.10.0-py3-none-any.whl", hash = "sha256:f0b0622e567335c8fabaaa659f1b33bcb6ddfe2e496071b743aa113f8774f2d3", size = 39814, upload-time = "2026-03-04T18:55:31.284Z" },
+]
+
+[[package]]
+name = "tenacity"
+version = "8.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/4d/6a19536c50b849338fcbe9290d562b52cbdcf30d8963d3588a68a4107df1/tenacity-8.5.0.tar.gz", hash = "sha256:8bc6c0c8a09b31e6cad13c47afbed1a567518250a9a171418582ed8d9c20ca78", size = 47309, upload-time = "2024-07-05T07:25:31.836Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d2/3f/8ba87d9e287b9d385a02a7114ddcef61b26f86411e121c9003eb509a1773/tenacity-8.5.0-py3-none-any.whl", hash = "sha256:b594c2a5945830c267ce6b79a166228323ed52718f30302c1359836112346687", size = 28165, upload-time = "2024-07-05T07:25:29.591Z" },
 ]
 
 [[package]]
