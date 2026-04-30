@@ -83,7 +83,9 @@ def run_factor_analysis(
     weight_vol: float = 1.0,
     weight_rev: float = 1.0,
     weight_val: float = 0.0,
+    weight_qual: float = 0.0,
     book_values: dict[str, float | None] | None = None,
+    roe_values: dict[str, float | None] | None = None,
     momentum_definition: str = "90d",
     artifact_dir: str | Path | None = None,
     reversal_filter_params=None,
@@ -101,6 +103,8 @@ def run_factor_analysis(
         factor_names = ["total_score", "mom_raw", "vol_raw", "rev_raw"]
         if weight_val > 0.0 and book_values is not None:
             factor_names.append("val_raw")
+        if weight_qual > 0.0 and roe_values is not None:
+            factor_names.append("qual_raw")
 
     lookback = 252 if momentum_definition == "12_1" else max(
         DEFAULT_LOOKBACK_MOM, DEFAULT_LOOKBACK_VOL, DEFAULT_LOOKBACK_REV
@@ -128,6 +132,7 @@ def run_factor_analysis(
                     window_dfs, top_n=top_n,
                     weight_mom=weight_mom, weight_vol=weight_vol,
                     weight_rev=weight_rev, weight_val=weight_val,
+                    weight_qual=weight_qual,
                     momentum_definition=momentum_definition,
                     book_values=book_values,
                 )
@@ -136,7 +141,8 @@ def run_factor_analysis(
                     window_dfs, top_n=top_n,
                     weight_mom=weight_mom, weight_vol=weight_vol,
                     weight_rev=weight_rev, weight_val=weight_val,
-                    book_values=book_values,
+                    weight_qual=weight_qual,
+                    book_values=book_values, roe_values=roe_values,
                 )
         except ValueError:
             continue

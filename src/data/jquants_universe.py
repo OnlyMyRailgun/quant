@@ -57,7 +57,14 @@ def get_topix_universe(size: str = "large100", force_refresh: bool = False) -> l
     df = cli.get_list()
     scales = scale_map[size]
     filtered = df[df["ScaleCat"].isin(scales)]
-    codes = [f"{code}.T" for code in filtered["Code"].tolist()]
+    # J-Quants uses 5-digit codes (e.g., "72030"). yfinance uses 4-digit.
+    # Strip trailing zero to match yfinance ticker format.
+    codes = []
+    for code in filtered["Code"].tolist():
+        if len(code) == 5 and code.endswith("0"):
+            codes.append(f"{code[:4]}.T")
+        else:
+            codes.append(f"{code}.T")
 
     # Update cache
     cached = {}
