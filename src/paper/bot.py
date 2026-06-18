@@ -21,6 +21,25 @@ import sqlite3
 DEFAULT_SIGNAL_WEIGHT_MOM = 1.0
 DEFAULT_SIGNAL_WEIGHT_VOL = 1.0
 DEFAULT_SIGNAL_WEIGHT_REV = 1.0
+DEFAULT_LOT_SIZE = 100
+
+
+def _round_down_to_lot(shares: int, lot_size: int = DEFAULT_LOT_SIZE) -> int:
+    if lot_size < 1:
+        raise ValueError("lot_size must be >= 1")
+    if shares <= 0:
+        return 0
+    return (shares // lot_size) * lot_size
+
+
+def _apply_adverse_slippage(action: str, theoretical_price: float, slippage: float) -> float:
+    if slippage < 0:
+        raise ValueError("slippage must be non-negative")
+    if action == "BUY":
+        return theoretical_price * (1 + slippage)
+    if action == "SELL":
+        return theoretical_price * (1 - slippage)
+    raise ValueError(f"Unsupported action: {action}")
 
 
 def _resolve_signal_weights(
@@ -254,6 +273,7 @@ def generate_rebalance_orders(
     target_symbols = winners['symbol'].tolist()
 
     order_ids: list[tuple[int, str, float]] = []
+    projected_cash = wallet_cash
 
     # 1. Determine SELL orders (what we hold but shouldn't)
     for sym, shares in current_portfolio.items():
@@ -261,19 +281,20 @@ def generate_rebalance_orders(
             price = dfs[sym]['Close'].iloc[-1]
             oid = place_pending_order(sym, 'SELL', shares, theoretical_price=price)
             order_ids.append((oid, 'SELL', price))
+            projected_cash += shares * price
 
     # 2. Determine BUY orders (allocating cash equally)
     # Note: A real system handles sell proceeds simultaneously.
     # For MVP we simply assume we divide current + theoretical proceeds equally.
     # To keep it safe, we just use the fixed theoretical target weight
-    target_value_per_stock = wallet_cash * 0.95 / len(target_symbols)
+    target_value_per_stock = projected_cash * 0.95 / len(target_symbols)
 
     for _, row in winners.iterrows():
         sym = row['symbol']
         price = row['price']
 
         current_shares = current_portfolio.get(sym, 0)
-        target_shares = int(target_value_per_stock / price)
+        target_shares = _round_down_to_lot(int(target_value_per_stock / price))
 
         diff = target_shares - current_shares
 
@@ -296,7 +317,7 @@ def generate_rebalance_orders(
         slippage = load_live_slippage()
         filled: list[tuple[int, str, float, float]] = []
         for oid, action, tprice in order_ids:
-            actual_price = tprice * (1 - slippage)
+            actual_price = _apply_adverse_slippage(action, tprice, slippage)
             fill_order(oid, actual_price)
             filled.append((oid, action, tprice, actual_price))
 

@@ -2,6 +2,7 @@ from pathlib import Path
 import sqlite3
 
 import pandas as pd
+import pytest
 
 import src.paper.bot as bot
 from src.research.artifacts import DEFAULT_ARTIFACT_DIR
@@ -151,3 +152,122 @@ def test_email_sent_in_auto_fill_mode(monkeypatch, tmp_path: Path):
     assert len(email_called["winners"]) == 1
     assert email_called["winners"][0]["symbol"] == "AAA.T"
     assert email_called["cash"] == 100_000.0
+
+
+def test_generate_rebalance_orders_rounds_buy_quantity_to_100_share_lot(monkeypatch, tmp_path: Path):
+    _setup_test_db_and_mocks(monkeypatch, tmp_path)
+    placed_orders = []
+
+    def fake_place_pending_order(symbol, action, shares, theoretical_price):
+        placed_orders.append(
+            {
+                "symbol": symbol,
+                "action": action,
+                "shares": shares,
+                "theoretical_price": theoretical_price,
+            }
+        )
+        return len(placed_orders)
+
+    monkeypatch.setattr(bot, "place_pending_order", fake_place_pending_order)
+
+    bot.generate_rebalance_orders()
+
+    buy_orders = [order for order in placed_orders if order["action"] == "BUY"]
+    assert buy_orders == [
+        {
+            "symbol": "AAA.T",
+            "action": "BUY",
+            "shares": 900,
+            "theoretical_price": 102.0,
+        }
+    ]
+
+
+def test_auto_fill_applies_adverse_slippage_by_order_side(monkeypatch, tmp_path: Path):
+    _setup_test_db_and_mocks(monkeypatch, tmp_path)
+
+    db = sqlite3.connect(bot.DB_PATH)
+    db.execute("INSERT INTO portfolio (symbol, shares, avg_price) VALUES ('6758.T', 100, 200.0)")
+    db.commit()
+    db.close()
+
+    def fake_fetch_universe(symbols, start_date, end_date):
+        return {
+            "AAA.T": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
+            "6758.T": pd.DataFrame({"Close": [200.0, 201.0, 202.0]}),
+        }
+
+    monkeypatch.setattr("src.data.bulk_loader.fetch_universe", fake_fetch_universe)
+
+    placed_by_id = {}
+
+    def fake_place_pending_order(symbol, action, shares, theoretical_price):
+        order_id = len(placed_by_id) + 1
+        placed_by_id[order_id] = {
+            "symbol": symbol,
+            "action": action,
+            "theoretical_price": theoretical_price,
+        }
+        return order_id
+
+    fills = []
+
+    def fake_fill_order(order_id, actual_price):
+        fills.append(
+            {
+                "action": placed_by_id[order_id]["action"],
+                "theoretical_price": placed_by_id[order_id]["theoretical_price"],
+                "actual_price": actual_price,
+            }
+        )
+
+    monkeypatch.setattr(bot, "place_pending_order", fake_place_pending_order)
+    monkeypatch.setattr("src.engine.commission.load_live_slippage", lambda: 0.01)
+    monkeypatch.setattr("src.paper.db.fill_order", fake_fill_order)
+
+    bot.generate_rebalance_orders(auto_fill=True)
+
+    assert {fill["action"] for fill in fills} == {"BUY", "SELL"}
+    assert fills == [
+        {"action": "SELL", "theoretical_price": 202.0, "actual_price": pytest.approx(199.98)},
+        {"action": "BUY", "theoretical_price": 102.0, "actual_price": pytest.approx(103.02)},
+    ]
+
+
+def test_rebalance_budget_includes_theoretical_non_target_sell_proceeds(monkeypatch, tmp_path: Path):
+    _setup_test_db_and_mocks(monkeypatch, tmp_path)
+
+    db = sqlite3.connect(bot.DB_PATH)
+    db.execute("INSERT INTO portfolio (symbol, shares, avg_price) VALUES ('6758.T', 100, 200.0)")
+    db.commit()
+    db.close()
+
+    def fake_fetch_universe(symbols, start_date, end_date):
+        return {
+            "AAA.T": pd.DataFrame({"Close": [100.0, 101.0, 102.0]}),
+            "6758.T": pd.DataFrame({"Close": [200.0, 201.0, 202.0]}),
+        }
+
+    placed_orders = []
+
+    def fake_place_pending_order(symbol, action, shares, theoretical_price):
+        placed_orders.append(
+            {
+                "symbol": symbol,
+                "action": action,
+                "shares": shares,
+                "theoretical_price": theoretical_price,
+            }
+        )
+        return len(placed_orders)
+
+    monkeypatch.setattr("src.data.bulk_loader.fetch_universe", fake_fetch_universe)
+    monkeypatch.setattr(bot, "place_pending_order", fake_place_pending_order)
+
+    bot.generate_rebalance_orders()
+
+    assert placed_orders == [
+        {"symbol": "6758.T", "action": "SELL", "shares": 100, "theoretical_price": 202.0},
+        {"symbol": "AAA.T", "action": "BUY", "shares": 1100, "theoretical_price": 102.0},
+    ]
