@@ -4,7 +4,7 @@ Japanese equities research and paper-trading platform. Monthly-rebalance, multi-
 
 ## Current State (2026-06-18)
 
-**Active research signal**: 12_1 momentum, low volatility, P/B value, quality/ROE, reversal filter. Monthly execution at month-start first trading day. 100-share lot minimum in the `simple` engine and paper-order target sizing. `top_n` is configurable; the default remains a 3-stock equal-weight portfolio.
+**Active research signal**: 12_1 momentum, low volatility, P/B value, quality/ROE, optional reversal filter. Monthly execution at month-start first trading day. 100-share lot minimum in the `simple` engine and paper-order target sizing. `top_n` is configurable; the default multi-factor research breadth is now a 10-stock equal-weight portfolio. The short-term mean-reversion score remains available for experiments, but its default weight is 0 and default optimizer grids do not combine positive momentum with positive mean-reversion weights.
 
 **Legacy OOS snapshot** (2025-01 to 2026-03, japan_large_30, realistic execution):
 
@@ -25,8 +25,13 @@ These numbers predate the 2026-06-18 repair batch. They must be treated as stale
 Locally repaired:
 
 - `top_n` is now propagated through `evaluate_weight_tuple`, walk-forward optimization, optimizer CLI, and simple/vectorbt engine dispatch instead of being hard-coded in execution paths.
+- Default multi-factor breadth is `top_n=10` across scorer, research scorer, engines, strategy, optimizer CLI, main dispatch, and paper signal generation.
+- Default short-term mean-reversion weight is 0, and the default optimizer grid excludes tuples where momentum and short-term mean reversion are both positive.
 - The `simple` engine now marks to market on every trading day through `evaluation_end`; return, Sharpe, and drawdown are computed from the evaluation-window daily equity series.
 - The `simple` engine returns symbol-level P&L diagnostics for walk-forward contributor and hit-rate reporting.
+- Walk-forward summary returns are compounded across validation windows instead of adding percentage returns.
+- Backtrader reference scoring excludes the current execution bar before cheat-on-close fills, removing the current-close look-ahead path.
+- Vectorbt execution dates now use the first observed trading day of each month from the data index instead of generic business-month-start dates.
 - The 12_1 paper-signal path now forwards quality/ROE inputs into research scoring.
 - Approved walk-forward parameters preserve optional value and quality weights (`val`, `qual`).
 - `src.main --engine simple|vectorbt|backtrader` now routes to the requested engine; Backtrader logging is used only for `--engine backtrader`.
@@ -35,10 +40,14 @@ Still not locally fixed:
 
 - Historical TOPIX/Nikkei constituents are not point-in-time. The named universes remain curated static lists, so survivorship and selection bias remain.
 - Fundamental release timing is estimated. P/B uses as-of scoring dates, but true filing timestamps are not available in the local data.
+- P/B is a weak standalone value proxy. Even clean point-in-time P/B should be treated as one candidate value signal, not proof of durable value alpha.
+- The current static universes are too small for institutional cross-sectional factor claims. They do not provide enough breadth for robust IC, industry-neutralization, or idiosyncratic-risk control.
+- Walk-forward optimization is still underpowered on short OOS samples. Compound accounting fixes the arithmetic, but it does not solve multiple-testing/data-mining risk.
+- Long-only results remain beta-heavy without a hedge, risk model, or factor exposure decomposition.
 - Adjusted prices, corporate actions, suspensions, delistings, and restatements have not been independently audited against a paid vendor.
 - Live broker fills are not reconciled against production execution records; paper auto-fill remains a simulation.
 - Institutional acceptance gates are not formalized: minimum OOS length, deflated Sharpe, multiple-testing controls, capacity/liquidity limits, stop/retire rules, and approval thresholds still need a research policy.
-- Asset-allocation material in this repo should be treated as exploratory notes unless a dedicated research engine and artifacts are added.
+- Asset-allocation material in this repo should be treated as exploratory notes unless a dedicated research engine and artifacts are added. Any gold buy-and-hold observations from 2024-2026 are hindsight observations, not alpha evidence.
 
 ## Factors
 
@@ -50,7 +59,7 @@ Still not locally fixed:
 | Quality | TTM net income / equity | Higher is better | 4 quarters |
 | Reversal Filter | Close drawdown from 20-day high > 10% | Entry gate | 20 days |
 
-Cross-sectional Z-scores, configurable weights. Grid search: product({0.0, 0.5, 1.0}, repeat=4) = 80 combinations.
+Cross-sectional Z-scores, configurable weights. Default grid search starts from product({0.0, 0.5, 1.0}, repeat=4), removes the all-zero tuple, and rejects tuples with both positive momentum and positive short-term mean-reversion weights, leaving 44 combinations.
 
 ## Architecture
 
@@ -61,7 +70,7 @@ Shared scorer (multi_factor.py + reversal filter)
     ↓
 Engine dispatch (--engine simple|vectorbt|backtrader, default: simple)
     ↓
-Walk-forward optimization (optimize.py, 80-combo grid)
+Walk-forward optimization (optimize.py, 44-combo default grid)
     ↓
 Artifact store + approval CLI
     ↓
@@ -120,7 +129,7 @@ Two weight optimization methods available via `--optimizer`:
 
 | Method | Description | WF Active Return |
 |--------|------------|:--:|
-| `grid` (default) | Brute-force product({0, 0.5, 1.0}, repeat=4) = 80 combos | -5.2pp |
+| `grid` (default) | Brute-force 44-combo conservative grid; excludes positive momentum plus positive short-term mean reversion | -5.2pp |
 | `optuna` | TPE sampler, categorical [0, 0.5, 1.0], 50 trials | **+4.1pp** |
 
 Optuna converges at 50 trials; 100 trials produces identical weights.
@@ -129,14 +138,16 @@ Optuna converges at 50 trials; 100 trials produces identical weights.
 
 ## Known Issues
 
-- **Walk-forward overfitting**: In-sample weight optimization (grid or optuna) does not produce weights that generalize to OOS. The signal itself is the limiting factor, not the optimization method.
-- **Still trailing N225**: Best configuration is 12.53% vs N225 33.35% over 15 months. Gate FAIL on excess return.
+- **Walk-forward overfitting**: In-sample weight optimization (grid or optuna) has not produced weights that generalize to OOS in legacy artifacts. The signal and sample size are the limiting factors, not only the optimization method.
+- **Legacy underperformance vs N225**: Best stale configuration is 12.53% vs N225 33.35% over 15 months. Gate FAIL on excess return until post-repair artifacts prove otherwise.
 - **100-share lot constraint**: Reduces returns by ~70% vs fractional-share assumption. High-price stocks may be excluded entirely (e.g., stock at ¥5,800 needs ¥580,000 minimum).
 - **Static universe**: japan_large_30 is a curated list, not point-in-time constituents. Survivorship bias present.
 - **Yahoo Finance data quality**: No independent audit of adjusted prices, suspensions, or delistings.
 - **P/B point-in-time**: Book values are now resolved as of each scoring date, but publication dates still use fiscal-year-end + 60-day estimates instead of actual filing timestamps.
+- **P/B proxy quality**: P/B alone is not a modern value stack. EV/EBIT, EV/FCF, earnings quality, shareholder yield, and sector-aware normalization would be needed for a stronger value research program.
+- **Long-only beta exposure**: The strategy can outperform or underperform because of market and sector beta. It cannot claim clean factor alpha without hedging or risk decomposition.
 - **Vectorbt realism**: The vectorbt path is intentionally optimistic and does not model slippage or 100-share lots.
-- **Research acceptance**: Legacy OOS metrics must be regenerated after the 2026-06-18 accounting, parameter-flow, and engine-dispatch fixes.
+- **Research acceptance**: Legacy OOS metrics must be regenerated after the 2026-06-18 accounting, no-look-ahead, parameter-flow, calendar, and default-configuration fixes.
 
 ## Legacy Research Findings
 

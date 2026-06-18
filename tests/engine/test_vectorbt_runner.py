@@ -1,3 +1,5 @@
+import inspect
+
 import pytest
 import pandas as pd
 import numpy as np
@@ -18,6 +20,9 @@ def make_price_df(symbols, n_days, seed=42):
 
 class TestRunBacktestVectorbt:
     """Smoke tests for run_backtest_vectorbt()."""
+
+    def test_run_backtest_vectorbt_default_top_n_is_broader_than_three_names(self):
+        assert inspect.signature(run_backtest_vectorbt).parameters["top_n"].default == 10
 
     def test_run_backtest_vectorbt_returns_metrics_dict(self):
         """Returns dict with all 5 required keys; sharpe and return_pct are floats."""
@@ -77,3 +82,26 @@ class TestRunBacktestVectorbt:
                 weights=(1.0, 1.0, 1.0),
                 slippage_pct=0.001,
             )
+
+    def test_run_backtest_vectorbt_uses_actual_first_trading_day_when_bms_is_absent(self):
+        dates = pd.bdate_range("2023-09-01", "2024-06-10")
+        dates = dates[dates != pd.Timestamp("2024-05-01")]
+        prices = [
+            100.0 if date <= pd.Timestamp("2024-05-02") else 110.0
+            for date in dates
+        ]
+        data = {
+            symbol: pd.DataFrame({"Close": prices}, index=dates)
+            for symbol in ["AAA.T", "BBB.T", "CCC.T"]
+        }
+
+        result = run_backtest_vectorbt(
+            data_dfs=data,
+            start="2024-05-01",
+            end="2024-06-10",
+            weights=(0.0, 0.0, 0.0),
+            top_n=3,
+            commission_rate=0.0,
+        )
+
+        assert result["return_pct"] > 0.0

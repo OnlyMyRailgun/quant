@@ -31,11 +31,13 @@ from src.strategies.multi_factor import UniversalMultiFactor
 
 
 STARTING_CASH = 1_000_000.0
-DEFAULT_BASELINE_WEIGHTS = (1.0, 1.0, 1.0, 0.0)
+DEFAULT_TOP_N = 10
+DEFAULT_BASELINE_WEIGHTS = (1.0, 1.0, 0.0, 0.0)
 DEFAULT_WEIGHT_GRID = [
     weights
     for weights in product((0.0, 0.5, 1.0), repeat=4)
     if any(w != 0.0 for w in weights)
+    and not (weights[0] > 0.0 and weights[2] > 0.0)
 ]
 DEFAULT_OPTIMIZE_START = "2021-01-01"
 DEFAULT_OPTIMIZE_END = "2024-01-01"
@@ -295,7 +297,8 @@ def _evaluate_weight_tuple_with_momentum(
     reversal_filter_params=None,
     engine="simple",
     book_values: BookValuesInput = None,
-    top_n: int = 3,
+    roe_values: dict[str, float | None] | None = None,
+    top_n: int = DEFAULT_TOP_N,
 ) -> dict[str, object]:
     return _call_evaluate_weight_tuple(
         data_dfs,
@@ -306,6 +309,7 @@ def _evaluate_weight_tuple_with_momentum(
         reversal_filter_params=reversal_filter_params,
         engine=engine,
         book_values=book_values,
+        roe_values=roe_values,
         top_n=top_n,
     )
 
@@ -340,7 +344,7 @@ def evaluate_weight_tuple(
     engine="backtrader",
     book_values: BookValuesInput = None,
     roe_values: dict[str, float | None] | None = None,
-    top_n: int = 3,
+    top_n: int = DEFAULT_TOP_N,
 ) -> dict[str, float]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -528,7 +532,8 @@ def run_walk_forward_optimization(
     book_values: BookValuesInput = None,
     optimizer: str = "grid",
     n_factors: int = 4,
-    top_n: int = 3,
+    top_n: int = DEFAULT_TOP_N,
+    roe_values: dict[str, float | None] | None = None,
 ) -> dict[str, object]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -616,6 +621,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
                 book_values=book_values,
+                roe_values=roe_values,
                 top_n=top_n,
             )
 
@@ -636,6 +642,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
                 book_values=book_values,
+                roe_values=roe_values,
                 top_n=top_n,
             )
             metrics = metrics | _build_validation_participation_metrics(
@@ -663,6 +670,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
                 book_values=book_values,
+                roe_values=roe_values,
                 top_n=top_n,
             )
 
@@ -679,6 +687,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
                 book_values=book_values,
+                roe_values=roe_values,
                 top_n=top_n,
             )
 
@@ -699,6 +708,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
                 book_values=book_values,
+                roe_values=roe_values,
                 top_n=top_n,
             )
 
@@ -712,6 +722,7 @@ def run_walk_forward_optimization(
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
+                roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
             )
@@ -725,6 +736,7 @@ def run_walk_forward_optimization(
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
+                roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
             ) | _build_validation_participation_metrics(
@@ -743,6 +755,7 @@ def run_walk_forward_optimization(
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
+                roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
             )
@@ -756,6 +769,7 @@ def run_walk_forward_optimization(
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
+                roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
             )
@@ -769,6 +783,7 @@ def run_walk_forward_optimization(
                 momentum_definition,
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
+                roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
             )
@@ -913,8 +928,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Weight optimization method (default: grid)")
     parser.add_argument("--optuna-trials", type=int, default=50,
                         help="Number of Optuna trials per window (default: 50)")
-    parser.add_argument("--top-n", type=int, default=3,
-                        help="Number of stocks to hold in each rebalance (default: 3)")
+    parser.add_argument("--top-n", type=int, default=DEFAULT_TOP_N,
+                        help=f"Number of stocks to hold in each rebalance (default: {DEFAULT_TOP_N})")
     return parser
 
 

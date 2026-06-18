@@ -9,6 +9,8 @@ import pandas as pd
 DEFAULT_LOOKBACK_MOM = 90
 DEFAULT_LOOKBACK_VOL = 20
 DEFAULT_LOOKBACK_REV = 20
+DEFAULT_TOP_N = 10
+DEFAULT_WEIGHT_REV = 0.0
 
 
 def _validate_close_series(df: pd.DataFrame) -> pd.Series:
@@ -110,10 +112,10 @@ def _has_only_finite_factors(factors: Mapping[str, float]) -> bool:
 
 def score_universe(
     data_dfs: Mapping[str, pd.DataFrame],
-    top_n: int = 3,
+    top_n: int = DEFAULT_TOP_N,
     weight_mom: float = 1.0,
     weight_vol: float = 1.0,
-    weight_rev: float = 1.0,
+    weight_rev: float = DEFAULT_WEIGHT_REV,
     weight_val: float = 0.0,
     weight_qual: float = 0.0,
     lookback_mom: int = DEFAULT_LOOKBACK_MOM,

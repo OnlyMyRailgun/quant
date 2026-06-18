@@ -19,6 +19,35 @@ PARTICIPATION_SUMMARY_FIELDS = (
 )
 
 
+def compound_return_pct(returns_pct: list[float]) -> float:
+    total = 1.0
+    for return_pct in returns_pct:
+        total *= 1.0 + (float(return_pct) / 100.0)
+    return (total - 1.0) * 100.0
+
+
+def _weight_tuple_to_dict(weights: tuple[float, ...]) -> dict[str, float]:
+    keys = ("mom", "vol", "rev", "val", "qual")
+    return {
+        key: float(weights[index])
+        for index, key in enumerate(keys)
+        if len(weights) > index
+    }
+
+
+def _weight_dict_to_tuple(weights: dict[str, float]) -> tuple[float, ...]:
+    result = [
+        float(weights["mom"]),
+        float(weights["vol"]),
+        float(weights["rev"]),
+    ]
+    if "val" in weights or "qual" in weights:
+        result.append(float(weights.get("val", 0.0)))
+    if "qual" in weights:
+        result.append(float(weights.get("qual", 0.0)))
+    return tuple(result)
+
+
 def _format_date(value: pd.Timestamp) -> str:
     return value.strftime("%Y-%m-%d")
 
@@ -229,13 +258,7 @@ def select_best_weights(
 
     for weights in weight_grid:
         metrics = evaluate(weights)
-        weight_dict = {
-            "mom": weights[0],
-            "vol": weights[1],
-            "rev": weights[2],
-        }
-        if len(weights) > 3:
-            weight_dict["val"] = weights[3]
+        weight_dict = _weight_tuple_to_dict(weights)
         rows.append(
             {
                 "weights": weight_dict,
@@ -292,13 +315,7 @@ def select_best_weights_optuna(
     best_tuple = tuple(best_weights[f"w{i}"] for i in range(n_factors))
     best_metrics = evaluate(best_tuple)
 
-    weight_dict = {
-        "mom": best_weights.get("w0", 0.0),
-        "vol": best_weights.get("w1", 0.0),
-        "rev": best_weights.get("w2", 0.0),
-    }
-    if n_factors > 3:
-        weight_dict["val"] = best_weights.get("w3", 0.0)
+    weight_dict = _weight_tuple_to_dict(best_tuple)
 
     rows = [
         {
@@ -337,10 +354,10 @@ def run_walk_forward_experiment(
     )
 
     rows: list[dict[str, object]] = []
-    baseline_total = 0.0
-    one_shot_total = 0.0
-    walk_forward_total = 0.0
-    benchmark_totals: dict[str, float] = {}
+    baseline_returns: list[float] = []
+    one_shot_returns: list[float] = []
+    walk_forward_returns: list[float] = []
+    benchmark_returns_by_name: dict[str, list[float]] = {}
     one_shot_best_weights: dict[str, float] | None = None
     benchmark_evaluators = evaluate_benchmark_windows or {}
     window_diagnostics: list[dict[str, object]] = []
@@ -363,12 +380,7 @@ def run_walk_forward_experiment(
             evaluate=lambda weights: evaluate_training_window(window, weights),
         )
         best_weights = leaderboard["best"]["weights"]
-        weight_tuple = (
-            best_weights["mom"],
-            best_weights["vol"],
-            best_weights["rev"],
-            best_weights.get("val", 0.0),
-        )
+        weight_tuple = _weight_dict_to_tuple(best_weights)
         validation_metrics = evaluate_validation_window(window, weight_tuple)
         baseline_metrics = evaluate_baseline_window(window)
         one_shot_return_pct = None
@@ -381,24 +393,19 @@ def run_walk_forward_experiment(
                     "evaluate_one_shot_training_window is provided"
                 )
 
-            one_shot_weight_tuple = (
-                one_shot_best_weights["mom"],
-                one_shot_best_weights["vol"],
-                one_shot_best_weights["rev"],
-                one_shot_best_weights.get("val", 0.0),
-            )
+            one_shot_weight_tuple = _weight_dict_to_tuple(one_shot_best_weights)
             one_shot_metrics = evaluate_one_shot_validation_window(
                 window,
                 one_shot_weight_tuple,
             )
             one_shot_return_pct = float(one_shot_metrics["return_pct"])
-            one_shot_total += one_shot_return_pct
+            one_shot_returns.append(one_shot_return_pct)
 
         for benchmark_name, evaluator in benchmark_evaluators.items():
             benchmark_metrics = evaluator(window)
             benchmark_return_pct = float(benchmark_metrics["return_pct"])
             benchmark_returns[benchmark_name] = benchmark_return_pct
-            benchmark_totals[benchmark_name] = benchmark_totals.get(benchmark_name, 0.0) + benchmark_return_pct
+            benchmark_returns_by_name.setdefault(benchmark_name, []).append(benchmark_return_pct)
 
         symbol_returns = validation_metrics.get("symbol_returns")
         diagnostics = build_portfolio_diagnostics(symbol_returns)
@@ -406,9 +413,18 @@ def run_walk_forward_experiment(
         window_symbol_returns.append(symbol_returns)
         window_participation_metrics.append(validation_metrics)
 
-        baseline_total += float(baseline_metrics["return_pct"])
-        walk_forward_total += float(validation_metrics["return_pct"])
+        baseline_returns.append(float(baseline_metrics["return_pct"]))
+        walk_forward_returns.append(float(validation_metrics["return_pct"]))
 
+        weight_columns = {
+            "weight_mom": best_weights["mom"],
+            "weight_vol": best_weights["vol"],
+            "weight_rev": best_weights["rev"],
+        }
+        if "val" in best_weights:
+            weight_columns["weight_val"] = best_weights["val"]
+        if "qual" in best_weights:
+            weight_columns["weight_qual"] = best_weights["qual"]
         rows.append(
             {
                 "rebalance_date": window["validation_start"],
@@ -416,9 +432,7 @@ def run_walk_forward_experiment(
                 "train_end": window["train_end"],
                 "validation_start": window["validation_start"],
                 "validation_end": window["validation_end"],
-                "weight_mom": best_weights["mom"],
-                "weight_vol": best_weights["vol"],
-                "weight_rev": best_weights["rev"],
+                **weight_columns,
                 "train_return_pct": leaderboard["best"]["return_pct"],
                 "validation_return_pct": float(validation_metrics["return_pct"]),
                 "baseline_return_pct": float(baseline_metrics["return_pct"]),
@@ -442,6 +456,8 @@ def run_walk_forward_experiment(
     summary_diagnostics = aggregate_portfolio_diagnostics(window_diagnostics)
     summary_contributors = aggregate_symbol_return_contributors(window_symbol_returns)
     summary_participation = aggregate_universe_participation_summary(window_participation_metrics)
+    baseline_total = compound_return_pct(baseline_returns)
+    walk_forward_total = compound_return_pct(walk_forward_returns)
     summary = {
         "window_count": len(rows),
         "baseline_return_pct": round(baseline_total, 10),
@@ -453,9 +469,11 @@ def run_walk_forward_experiment(
     }
     summary.update(summary_participation)
     if one_shot_best_weights is not None:
+        one_shot_total = compound_return_pct(one_shot_returns)
         summary["one_shot_return_pct"] = round(one_shot_total, 10)
         summary["one_shot_active_return_pct"] = round(one_shot_total - baseline_total, 10)
-    for benchmark_name, benchmark_total in benchmark_totals.items():
+    for benchmark_name, benchmark_returns_for_name in benchmark_returns_by_name.items():
+        benchmark_total = compound_return_pct(benchmark_returns_for_name)
         summary[f"{benchmark_name}_return_pct"] = round(benchmark_total, 10)
         summary[f"walk_forward_excess_vs_{benchmark_name}_pct"] = round(
             walk_forward_total - benchmark_total,

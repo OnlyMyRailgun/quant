@@ -46,6 +46,7 @@ def _setup_test_db_and_mocks(monkeypatch, tmp_path: Path, with_filled_orders: bo
     captured = {}
 
     def fake_calculate_current_signals(data_dfs, top_n=3, **kwargs):
+        captured["top_n"] = top_n
         captured.update(kwargs)
         return pd.DataFrame([
             {"symbol": "AAA.T", "price": 102.0, "total_score": 1.0}
@@ -61,6 +62,7 @@ def test_generate_rebalance_orders_uses_default_approved_params_artifact_dir(mon
     bot.generate_rebalance_orders()
 
     assert captured.get("artifact_dir") == DEFAULT_ARTIFACT_DIR
+    assert captured["top_n"] == 10
 
 
 def test_generate_rebalance_orders_uses_roe_values_for_quality_factor(monkeypatch, tmp_path: Path):
@@ -128,6 +130,7 @@ def test_monthly_guard_allows_rebalance_when_last_filled_is_previous_month(monke
 
     def fake_calculate_current_signals(data_dfs, top_n=3, **kwargs):
         captured["called"] = True
+        captured["top_n"] = top_n
         captured.update(kwargs)
         return pd.DataFrame([
             {"symbol": "AAA.T", "price": 102.0, "total_score": 1.0}

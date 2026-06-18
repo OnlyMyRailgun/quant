@@ -26,6 +26,18 @@ def test_score_universe_ranks_symbols_by_total_score():
     assert list(result["is_top_n"]) == [True, True, False]
 
 
+def test_score_universe_defaults_use_broader_portfolio_and_disable_reversion():
+    data = {
+        f"{idx:03d}.T": make_df([100 + idx] * 100)
+        for idx in range(12)
+    }
+
+    result = score_universe(data)
+
+    assert int(result["is_top_n"].sum()) == 10
+    assert result["rev_contribution"].tolist() == [0.0] * len(result)
+
+
 def test_score_universe_exposes_weighted_factor_contributions():
     data = {
         "AAA.T": make_df([100] * 70 + list(range(100, 110)) + list(range(150, 130, -1))),
@@ -175,7 +187,7 @@ def test_calculate_current_signals_falls_back_when_no_approved_params_exist(tmp_
     }
 
     winners = calculate_current_signals(data, top_n=2, artifact_dir=tmp_path)
-    expected = score_universe(data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=1.0).head(2)
+    expected = score_universe(data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=0.0).head(2)
 
     assert winners["symbol"].tolist() == expected["symbol"].tolist()
     assert winners["total_score"].tolist() == expected["total_score"].tolist()

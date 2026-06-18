@@ -1,7 +1,13 @@
+import inspect
+
 import pandas as pd
 import pytest
 
 from src.engine.simple_runner import run_backtest_simple
+
+
+def test_simple_runner_default_top_n_is_broader_than_three_names():
+    assert inspect.signature(run_backtest_simple).parameters["top_n"].default == 10
 
 
 def test_simple_runner_evaluation_return_uses_first_evaluation_equity_as_base():

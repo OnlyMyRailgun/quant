@@ -25,6 +25,7 @@ from src.engine.commission import JapanStockCommission
 from src.engine.runner import run_backtest
 from src.research.approved_params import resolve_approved_weight_values
 from src.research.screening import ScreeningRules, screen_universe
+from src.scoring.multi_factor import DEFAULT_TOP_N, DEFAULT_WEIGHT_REV
 
 
 def _strategy_param_names(strategy_class) -> set[str]:
@@ -145,7 +146,7 @@ def resolve_multi_factor_weights(
         weight_mom=weight_mom,
         weight_vol=weight_vol,
         weight_rev=weight_rev,
-        fallback=(1.0, 1.0, 1.0),
+        fallback=(1.0, 1.0, DEFAULT_WEIGHT_REV),
     )
     weights = {
         "weight_mom": resolved["mom"],
@@ -164,6 +165,7 @@ def resolve_multi_factor_strategy_kwargs(
     weight_mom,
     weight_vol,
     weight_rev,
+    top_n=DEFAULT_TOP_N,
     buy_rank_threshold=None,
     sell_rank_threshold=None,
     artifact_run_name=None,
@@ -176,6 +178,7 @@ def resolve_multi_factor_strategy_kwargs(
         weight_vol=weight_vol,
         weight_rev=weight_rev,
     )
+    kwargs["top_n"] = top_n
     if buy_rank_threshold is not None:
         kwargs["buy_rank_threshold"] = buy_rank_threshold
     if sell_rank_threshold is not None:
@@ -272,6 +275,7 @@ def main():
     parser.add_argument("--weight-mom", type=float, default=None, help="Weight for Momentum Factor")
     parser.add_argument("--weight-vol", type=float, default=None, help="Weight for Low Volatility Factor")
     parser.add_argument("--weight-rev", type=float, default=None, help="Weight for Mean Reversion Factor")
+    parser.add_argument("--top-n", type=int, default=DEFAULT_TOP_N, help="Number of names to hold")
     parser.add_argument("--buy-rank-threshold", type=int, default=None, help="Buy only when rank is at or above this threshold")
     parser.add_argument("--sell-rank-threshold", type=int, default=None, help="Keep holdings until rank falls below this threshold")
     parser.add_argument("--start", type=str, default="2023-01-01", help="Start date (YYYY-MM-DD)")
@@ -361,6 +365,7 @@ def main():
             weight_mom=args.weight_mom,
             weight_vol=args.weight_vol,
             weight_rev=args.weight_rev,
+            top_n=args.top_n,
             buy_rank_threshold=args.buy_rank_threshold,
             sell_rank_threshold=args.sell_rank_threshold,
             artifact_run_name="backtest_rebalance",

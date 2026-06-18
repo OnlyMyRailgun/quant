@@ -50,6 +50,24 @@ def test_resolve_multi_factor_weights_respects_explicit_cli_overrides(tmp_path: 
     assert weights == {"weight_mom": 1.0, "weight_vol": 1.0, "weight_rev": 0.0}
 
 
+def test_default_multi_factor_fallback_does_not_mix_positive_momentum_and_reversion(tmp_path: Path):
+    weights = resolve_multi_factor_weights(
+        artifact_dir=tmp_path,
+        weight_mom=None,
+        weight_vol=None,
+        weight_rev=None,
+    )
+    paper_weights = _resolve_signal_weights(
+        artifact_dir=tmp_path,
+        weight_mom=None,
+        weight_vol=None,
+        weight_rev=None,
+    )
+
+    assert weights == {"weight_mom": 1.0, "weight_vol": 1.0, "weight_rev": 0.0}
+    assert paper_weights == (1.0, 1.0, 0.0)
+
+
 def test_resolve_multi_factor_weights_preserves_optional_value_quality_weights(tmp_path: Path):
     write_approved_params(
         tmp_path,
@@ -110,6 +128,7 @@ def test_resolve_multi_factor_strategy_kwargs_preserves_weight_defaults_and_thre
         "weight_mom": 0.5,
         "weight_vol": 1.0,
         "weight_rev": 0.5,
+        "top_n": 10,
         "buy_rank_threshold": 2,
         "sell_rank_threshold": 4,
         "artifact_dir": tmp_path,
@@ -255,6 +274,7 @@ def test_main_multi_factor_offline_smoke_uses_approved_params_and_skips_plot(mon
         "weight_mom": 0.25,
         "weight_vol": 0.75,
         "weight_rev": 0.5,
+        "top_n": 10,
         "artifact_dir": tmp_path,
         "artifact_run_name": "backtest_rebalance",
         "universe_name": "topix_top_10",
@@ -350,6 +370,7 @@ def test_main_simple_engine_uses_engine_dispatch_instead_of_logging(monkeypatch,
             "weight_mom": 0.25,
             "weight_vol": 0.75,
             "weight_rev": 0.5,
+            "top_n": 10,
             "artifact_dir": tmp_path,
             "artifact_run_name": "backtest_rebalance",
         },
@@ -474,6 +495,7 @@ def test_main_multi_factor_filters_named_universe_with_screening(monkeypatch, tm
         "weight_mom": 0.25,
         "weight_vol": 0.75,
         "weight_rev": 0.5,
+        "top_n": 10,
         "artifact_dir": tmp_path,
         "artifact_run_name": "backtest_rebalance",
         "universe_name": "custom_universe",
@@ -657,6 +679,7 @@ def test_main_multi_factor_can_select_named_universe_without_affecting_default_t
         "weight_mom": 0.25,
         "weight_vol": 0.75,
         "weight_rev": 0.5,
+        "top_n": 10,
         "artifact_dir": tmp_path,
         "artifact_run_name": "backtest_rebalance",
         "universe_name": "custom_universe",

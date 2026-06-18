@@ -5,6 +5,7 @@ import pandas as pd
 
 from src.engine.order_builder import build_orders
 from src.scoring.multi_factor import (
+    DEFAULT_TOP_N,
     score_universe,
     DEFAULT_LOOKBACK_MOM,
     DEFAULT_LOOKBACK_VOL,
@@ -12,12 +13,25 @@ from src.scoring.multi_factor import (
 )
 
 
+def _first_trading_days(data_dfs: dict[str, pd.DataFrame]) -> pd.DatetimeIndex:
+    all_dates = set()
+    for df in data_dfs.values():
+        if df is not None and not df.empty:
+            all_dates.update(df.index)
+    dates = pd.DatetimeIndex(sorted(all_dates))
+    if dates.empty:
+        return dates
+    frame = pd.DataFrame({"date": dates})
+    first_days = frame.groupby([frame["date"].dt.year, frame["date"].dt.month])["date"].first()
+    return pd.DatetimeIndex(first_days.values)
+
+
 def run_backtest_vectorbt(
     data_dfs: dict[str, pd.DataFrame],
     start: str,
     end: str,
     weights: tuple[float, float, float],
-    top_n: int = 3,
+    top_n: int = DEFAULT_TOP_N,
     initial_cash: float = 1_000_000.0,
     commission_rate: float = 0.001,
     slippage_pct: float = 0.0,
@@ -89,7 +103,11 @@ def run_backtest_vectorbt(
     #    This matches real-world: you score after market close on the
     #    last day of month N, then trade on the first day of month N+1.
     # ------------------------------------------------------------------
-    exec_dates = pd.date_range(start, end, freq="BMS")
+    all_first_days = _first_trading_days(data_dfs)
+    exec_dates = all_first_days[
+        (all_first_days >= pd.Timestamp(start))
+        & (all_first_days <= pd.Timestamp(end))
+    ]
 
     # ------------------------------------------------------------------
     # 3. Per-date scoring loop

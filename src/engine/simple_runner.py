@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 import numpy as np
 import pandas as pd
 
-from src.scoring.multi_factor import score_universe
+from src.scoring.multi_factor import DEFAULT_TOP_N, score_universe
 
 BookValuesInput = (
     Mapping[str, float | None]
@@ -72,7 +72,7 @@ def run_backtest_simple(
     start: str,
     end: str,
     weights: tuple[float, float, float],
-    top_n: int = 3,
+    top_n: int = DEFAULT_TOP_N,
     initial_cash: float = 1_000_000.0,
     fee_rate: float = 0.0005,
     momentum_definition: str = "90d",

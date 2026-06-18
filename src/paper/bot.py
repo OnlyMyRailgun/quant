@@ -11,6 +11,8 @@ from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_MOM,
     DEFAULT_LOOKBACK_REV,
     DEFAULT_LOOKBACK_VOL,
+    DEFAULT_TOP_N,
+    DEFAULT_WEIGHT_REV,
     score_universe,
 )
 from src.paper.db import DB_PATH, get_wallet_balance, place_pending_order
@@ -20,7 +22,7 @@ import sqlite3
 
 DEFAULT_SIGNAL_WEIGHT_MOM = 1.0
 DEFAULT_SIGNAL_WEIGHT_VOL = 1.0
-DEFAULT_SIGNAL_WEIGHT_REV = 1.0
+DEFAULT_SIGNAL_WEIGHT_REV = DEFAULT_WEIGHT_REV
 DEFAULT_LOT_SIZE = 100
 
 
@@ -62,12 +64,15 @@ def _resolve_signal_weights(
     return resolved["mom"], resolved["vol"], resolved["rev"]
 
 
+DEFAULT_SIGNAL_TOP_N = DEFAULT_TOP_N
+
+
 def _build_signal_run(
     data_dfs,
-    top_n=3,
+    top_n=DEFAULT_SIGNAL_TOP_N,
     weight_mom=1.0,
     weight_vol=1.0,
-    weight_rev=1.0,
+    weight_rev=DEFAULT_SIGNAL_WEIGHT_REV,
     weight_val=0.0,
     weight_qual=0.0,
     lookback_mom=DEFAULT_LOOKBACK_MOM,
@@ -119,7 +124,7 @@ def _with_legacy_factor_aliases(ranked: pd.DataFrame) -> pd.DataFrame:
 
 def calculate_current_signals(
     data_dfs,
-    top_n=3,
+    top_n=DEFAULT_SIGNAL_TOP_N,
     weight_mom: float | None = None,
     weight_vol: float | None = None,
     weight_rev: float | None = None,
@@ -241,7 +246,7 @@ def generate_rebalance_orders(
 
     print("\nRunning Multi-Factor Scoring Engine on Latest Close...")
     winners = calculate_current_signals(
-        dfs, top_n=3, artifact_dir=DEFAULT_ARTIFACT_DIR,
+        dfs, top_n=DEFAULT_SIGNAL_TOP_N, artifact_dir=DEFAULT_ARTIFACT_DIR,
         momentum_definition=momentum_definition,
         reversal_filter_params=reversal_filter_params,
         weight_val=0.5, weight_qual=1.0,

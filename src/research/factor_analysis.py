@@ -14,6 +14,7 @@ from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_MOM,
     DEFAULT_LOOKBACK_VOL,
     DEFAULT_LOOKBACK_REV,
+    DEFAULT_WEIGHT_REV,
 )
 
 BookValuesInput = (
@@ -97,7 +98,7 @@ def run_factor_analysis(
     factor_names: list[str] | None = None,
     weight_mom: float = 1.0,
     weight_vol: float = 1.0,
-    weight_rev: float = 1.0,
+    weight_rev: float = DEFAULT_WEIGHT_REV,
     weight_val: float = 0.0,
     weight_qual: float = 0.0,
     book_values: BookValuesInput = None,
@@ -315,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--momentum-definition", choices=["90d", "12_1"], default="90d")
     parser.add_argument("--weight-mom", type=float, default=1.0)
     parser.add_argument("--weight-vol", type=float, default=1.0)
-    parser.add_argument("--weight-rev", type=float, default=1.0)
+    parser.add_argument("--weight-rev", type=float, default=DEFAULT_WEIGHT_REV)
     parser.add_argument("--weight-val", type=float, default=0.0)
     parser.add_argument("--reversal-filter", action="store_true")
     parser.add_argument("--artifact-dir", type=Path, default=Path(".research_artifacts/factor_analysis"))

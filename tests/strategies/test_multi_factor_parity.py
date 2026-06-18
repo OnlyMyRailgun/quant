@@ -26,6 +26,14 @@ def run_strategy_with_history(data_dfs, **kwargs):
     return cerebro.runstrats[0][0]
 
 
+def test_universal_multi_factor_default_top_n_is_broader_than_three_names():
+    assert UniversalMultiFactor.params.top_n == 10
+
+
+def test_universal_multi_factor_default_reversion_weight_is_disabled():
+    assert UniversalMultiFactor.params.weight_rev == 0.0
+
+
 def _build_month_change_data():
     dates = pd.date_range("2024-01-01", periods=240, freq="D")
     return {
@@ -35,7 +43,7 @@ def _build_month_change_data():
     }
 
 
-def test_collect_visible_history_returns_symbol_dataframes():
+def test_collect_visible_history_excludes_current_execution_bar():
     data = {
         "AAA.T": make_df([100 + i for i in range(8)]),
         "BBB.T": make_df([200 + i for i in range(8)]),
@@ -53,7 +61,7 @@ def test_collect_visible_history_returns_symbol_dataframes():
 
     assert set(history) == {"AAA.T", "BBB.T"}
     assert list(history["AAA.T"].columns) == ["Close"]
-    assert history["AAA.T"]["Close"].tolist() == data["AAA.T"]["Close"].tolist()
+    assert history["AAA.T"]["Close"].tolist() == data["AAA.T"]["Close"].iloc[:-1].tolist()
 
 
 def test_strategy_adapter_ranking_matches_shared_scorer():
@@ -76,7 +84,7 @@ def test_strategy_adapter_ranking_matches_shared_scorer():
 
     ranked = strategy._score_visible_universe()
     expected = score_universe(
-        data,
+        {symbol: df.iloc[:-1] for symbol, df in data.items()},
         top_n=2,
         weight_mom=0.5,
         weight_vol=1.0,
@@ -116,7 +124,7 @@ def test_rebalance_uses_shared_ranked_top_n():
     strategy.rebalance()
 
     expected = score_universe(
-        data,
+        {symbol: df.iloc[:-1] for symbol, df in data.items()},
         top_n=2,
         weight_mom=0.5,
         weight_vol=1.0,

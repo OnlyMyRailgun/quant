@@ -5,7 +5,7 @@ import backtrader as bt
 import pandas as pd
 
 from src.research.artifacts import build_scoring_metadata, build_scoring_summary, write_scoring_run
-from src.scoring.multi_factor import score_universe
+from src.scoring.multi_factor import DEFAULT_TOP_N, DEFAULT_WEIGHT_REV, score_universe
 
 class UniversalMultiFactor(bt.Strategy):
     """
@@ -20,8 +20,8 @@ class UniversalMultiFactor(bt.Strategy):
         lookback_rev=20,     # Trading days for mean reversion
         weight_mom=1.0,      # Weight of momentum factor
         weight_vol=1.0,      # Weight of low volatility factor (higher score mapped to lower vol)
-        weight_rev=1.0,      # Weight of mean reversion factor (higher score mapped to biggest dip)
-        top_n=3,             # Top N to hold
+        weight_rev=DEFAULT_WEIGHT_REV,  # Weight of mean reversion factor (higher score mapped to biggest dip)
+        top_n=DEFAULT_TOP_N,            # Top N to hold
         buy_rank_threshold=None,
         sell_rank_threshold=None,
         artifact_dir=None,
@@ -81,6 +81,10 @@ class UniversalMultiFactor(bt.Strategy):
                 bt.num2date(value).replace(tzinfo=None)
                 for value in data.datetime.get(size=len(data))
             ]
+            if not closes or not datetimes:
+                continue
+            closes = closes[:-1]
+            datetimes = datetimes[:-1]
             if not closes or not datetimes:
                 continue
 

@@ -11,6 +11,8 @@ from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_MOM,
     DEFAULT_LOOKBACK_VOL,
     DEFAULT_LOOKBACK_REV,
+    DEFAULT_TOP_N,
+    DEFAULT_WEIGHT_REV,
 )
 
 def _compute_research_factors(
@@ -61,10 +63,10 @@ def _compute_research_factors(
 
 def score_research_universe(
     data_dfs: Mapping[str, pd.DataFrame],
-    top_n: int = 3,
+    top_n: int = DEFAULT_TOP_N,
     weight_mom: float = 1.0,
     weight_vol: float = 1.0,
-    weight_rev: float = 1.0,
+    weight_rev: float = DEFAULT_WEIGHT_REV,
     weight_val: float = 0.0,
     weight_qual: float = 0.0,
     momentum_definition: Literal["90d", "12_1"] = "90d",

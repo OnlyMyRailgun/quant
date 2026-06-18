@@ -35,6 +35,20 @@ def test_score_research_universe_supports_12_1_momentum_definition():
     assert results.iloc[0]["symbol"] == "TEST"
     assert results.iloc[0]["mom_raw"] == pytest.approx(0.5)
 
+
+def test_score_research_universe_defaults_use_broader_portfolio_and_disable_reversion():
+    dates = pd.date_range("2021-01-01", periods=300)
+    data_dfs = {
+        f"{idx:03d}.T": pd.DataFrame({"Close": [100.0 + idx] * 300}, index=dates)
+        for idx in range(12)
+    }
+
+    results = score_research_universe(data_dfs, momentum_definition="12_1")
+
+    assert int(results["is_top_n"].sum()) == 10
+    assert results["rev_contribution"].tolist() == [0.0] * len(results)
+
+
 def test_score_research_universe_skips_symbols_without_12_1_history():
     dates = pd.date_range("2021-01-01", periods=200) # Less than 252
     df = pd.DataFrame({"Close": [100.0] * 200}, index=dates)

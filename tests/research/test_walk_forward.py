@@ -97,6 +97,34 @@ def test_default_weight_grid_excludes_all_zero_tuple():
     assert (0.0, 0.0, 0.0, 0.0) not in optimize.DEFAULT_WEIGHT_GRID
 
 
+def test_default_weight_grid_excludes_positive_momentum_and_reversion_mix():
+    assert all(
+        not (weights[0] > 0.0 and weights[2] > 0.0)
+        for weights in optimize.DEFAULT_WEIGHT_GRID
+    )
+
+
+def test_select_best_weights_preserves_quality_weight():
+    leaderboard = select_best_weights(
+        weight_grid=[
+            (1.0, 0.0, 0.0, 0.5, 0.0),
+            (0.0, 1.0, 0.0, 0.5, 1.0),
+        ],
+        evaluate=lambda weights: {
+            (1.0, 0.0, 0.0, 0.5, 0.0): {"return_pct": 1.0, "sharpe": 0.1},
+            (0.0, 1.0, 0.0, 0.5, 1.0): {"return_pct": 2.0, "sharpe": 0.2},
+        }[weights],
+    )
+
+    assert leaderboard["best"]["weights"] == {
+        "mom": 0.0,
+        "vol": 1.0,
+        "rev": 0.0,
+        "val": 0.5,
+        "qual": 1.0,
+    }
+
+
 def test_write_walk_forward_run_persists_weights_and_summary(tmp_path: Path):
     weights = pd.DataFrame(
         [
@@ -440,15 +468,15 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
     ]
     assert result["summary"] == {
         "window_count": 2,
-        "baseline_return_pct": 2.2,
-        "one_shot_return_pct": 3.2,
-        "walk_forward_return_pct": 4.0,
-        "one_shot_active_return_pct": 1.0,
-        "active_return_pct": 1.8,
-        "topx_return_pct": 1.9,
-        "n225_return_pct": 2.1,
-        "walk_forward_excess_vs_topx_pct": 2.1,
-        "walk_forward_excess_vs_n225_pct": 1.9,
+        "baseline_return_pct": 2.212,
+        "one_shot_return_pct": 3.2252,
+        "walk_forward_return_pct": 4.0375,
+        "one_shot_active_return_pct": 1.0132,
+        "active_return_pct": 1.8255,
+        "topx_return_pct": 1.9088,
+        "n225_return_pct": 2.108,
+        "walk_forward_excess_vs_topx_pct": 2.1287,
+        "walk_forward_excess_vs_n225_pct": 1.9295,
         "avg_hit_rate": 0.75,
         "top_contributors": [
             {"symbol": "AAA.T", "return_pct": 3.5},
@@ -461,6 +489,78 @@ def test_run_walk_forward_experiment_returns_rebalance_weights_and_summary():
             {"symbol": "AAA.T", "return_pct": 3.5},
         ],
     }
+
+
+def test_run_walk_forward_experiment_compounds_summary_returns():
+    result = run_walk_forward_experiment(
+        start="2021-01-01",
+        end="2021-12-31",
+        train_months=6,
+        validation_months=3,
+        step_months=3,
+        weight_grid=[(1.0, 0.0, 0.0, 0.0)],
+        evaluate_training_window=lambda window, weights: {"return_pct": 1.0, "sharpe": 0.1},
+        evaluate_validation_window=lambda window, weights: {
+            "return_pct": {
+                "2021-07-01": 10.0,
+                "2021-10-01": -10.0,
+            }[window["validation_start"]],
+            "sharpe": 0.1,
+        },
+        evaluate_baseline_window=lambda window: {
+            "return_pct": {
+                "2021-07-01": 5.0,
+                "2021-10-01": -5.0,
+            }[window["validation_start"]],
+            "sharpe": 0.1,
+        },
+        evaluate_one_shot_training_window=lambda weights: {"return_pct": 1.0, "sharpe": 0.1},
+        evaluate_one_shot_validation_window=lambda window, weights: {
+            "return_pct": {
+                "2021-07-01": 20.0,
+                "2021-10-01": -10.0,
+            }[window["validation_start"]],
+            "sharpe": 0.1,
+        },
+        evaluate_benchmark_windows={
+            "topx": lambda window: {
+                "return_pct": {
+                    "2021-07-01": 2.0,
+                    "2021-10-01": -1.0,
+                }[window["validation_start"]]
+            },
+        },
+    )
+
+    assert result["summary"]["walk_forward_return_pct"] == pytest.approx(-1.0)
+    assert result["summary"]["baseline_return_pct"] == pytest.approx(-0.25)
+    assert result["summary"]["active_return_pct"] == pytest.approx(-0.75)
+    assert result["summary"]["one_shot_return_pct"] == pytest.approx(8.0)
+    assert result["summary"]["one_shot_active_return_pct"] == pytest.approx(8.25)
+    assert result["summary"]["topx_return_pct"] == pytest.approx(0.98)
+    assert result["summary"]["walk_forward_excess_vs_topx_pct"] == pytest.approx(-1.98)
+
+
+def test_run_walk_forward_experiment_passes_quality_weight_to_validation():
+    captured_validation_weights = []
+
+    result = run_walk_forward_experiment(
+        start="2021-01-01",
+        end="2021-09-30",
+        train_months=6,
+        validation_months=3,
+        step_months=3,
+        weight_grid=[(0.0, 1.0, 0.0, 0.5, 1.0)],
+        evaluate_training_window=lambda window, weights: {"return_pct": 1.0, "sharpe": 0.1},
+        evaluate_validation_window=lambda window, weights: (
+            captured_validation_weights.append(weights)
+            or {"return_pct": 2.0, "sharpe": 0.2}
+        ),
+        evaluate_baseline_window=lambda window: {"return_pct": 1.0, "sharpe": 0.1},
+    )
+
+    assert captured_validation_weights == [(0.0, 1.0, 0.0, 0.5, 1.0)]
+    assert result["weights"]["weight_qual"].tolist() == [1.0]
 
 
 def test_run_walk_forward_experiment_aggregates_summary_contributors_from_full_symbol_returns():
@@ -900,6 +1000,52 @@ def test_run_walk_forward_optimization_forwards_top_n_to_all_evaluators(monkeypa
     assert [kwargs.get("book_values") for kwargs in captured_kwargs] == [book_values] * 5
 
 
+def test_run_walk_forward_optimization_forwards_roe_values_to_all_evaluators(monkeypatch):
+    captured_kwargs = []
+
+    def fake_evaluate_weight_tuple(*args, **kwargs):
+        del args
+        captured_kwargs.append(kwargs)
+        return {"return_pct": 1.0, "sharpe": 0.1, "drawdown": 0.0}
+
+    def fake_run_walk_forward_experiment(**kwargs):
+        window = {
+            "train_start": "2021-01-01",
+            "train_end": "2021-06-30",
+            "validation_start": "2021-07-01",
+            "validation_end": "2021-12-31",
+        }
+        kwargs["evaluate_training_window"](window, (0.0, 1.0, 0.0, 0.5, 1.0))
+        kwargs["evaluate_validation_window"](window, (0.0, 1.0, 0.0, 0.5, 1.0))
+        kwargs["evaluate_baseline_window"](window)
+        kwargs["evaluate_one_shot_training_window"]((0.0, 1.0, 0.0, 0.5, 1.0))
+        kwargs["evaluate_one_shot_validation_window"](window, (0.0, 1.0, 0.0, 0.5, 1.0))
+        return {
+            "weights": pd.DataFrame(),
+            "summary": {
+                "window_count": 1,
+                "baseline_return_pct": 0.0,
+                "walk_forward_return_pct": 0.0,
+            },
+        }
+
+    monkeypatch.setattr(optimize, "evaluate_weight_tuple", fake_evaluate_weight_tuple)
+    monkeypatch.setattr(optimize, "run_walk_forward_experiment", fake_run_walk_forward_experiment)
+    roe_values = {"AAA.T": 0.2}
+
+    optimize.run_walk_forward_optimization(
+        data_dfs={"AAA.T": pd.DataFrame({"Close": [100.0]}, index=[pd.Timestamp("2021-07-01")])},
+        start="2021-01-01",
+        end="2021-12-31",
+        artifact_dir=None,
+        universe_symbols=["AAA.T"],
+        roe_values=roe_values,
+        n_factors=5,
+    )
+
+    assert [kwargs.get("roe_values") for kwargs in captured_kwargs] == [roe_values] * 5
+
+
 def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator(
     monkeypatch,
     tmp_path: Path,
@@ -1059,6 +1205,7 @@ def test_optimize_main_uses_default_research_window_and_cli_defaults(monkeypatch
     assert captured["run"]["train_months"] == 12
     assert captured["run"]["validation_months"] == 6
     assert captured["run"]["step_months"] == 6
+    assert captured["run"]["top_n"] == 10
     assert set(captured["run"]["benchmark_data_dfs"]) == {"topx", "n225"}
 
 
