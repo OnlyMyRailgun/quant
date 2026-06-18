@@ -26,9 +26,11 @@ def _setup_test_db_and_mocks(monkeypatch, tmp_path: Path, with_filled_orders: bo
     )
     if with_filled_orders:
         # Simulate a filled order from earlier this month
+        filled_date = pd.Timestamp.today().strftime("%Y-%m-%d")
         db.execute(
             "INSERT INTO orders (date, symbol, action, target_shares, theoretical_price, status)"
-            " VALUES ('2026-04-27', 'AAA.T', 'BUY', 100, 5000.0, 'FILLED')"
+            " VALUES (?, 'AAA.T', 'BUY', 100, 5000.0, 'FILLED')",
+            (filled_date,),
         )
     db.commit()
     db.close()
