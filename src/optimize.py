@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable, Mapping
 from itertools import product
 from pathlib import Path
 
@@ -45,6 +46,20 @@ DEFAULT_BENCHMARK_SYMBOLS = {
     "n225": "1321.T",
 }
 SUPPORTED_MOMENTUM_DEFINITIONS = {"90d", "12_1"}
+BookValuesInput = (
+    Mapping[str, float | None]
+    | Callable[[pd.Timestamp], Mapping[str, float | None] | None]
+    | None
+)
+
+
+def _resolve_book_values(
+    book_values: BookValuesInput,
+    as_of_date: str | pd.Timestamp,
+) -> Mapping[str, float | None] | None:
+    if callable(book_values):
+        return book_values(pd.Timestamp(as_of_date))
+    return book_values
 
 
 class SymbolReturnAnalyzer(bt.Analyzer):
@@ -225,7 +240,7 @@ def _evaluate_weight_tuple_with_momentum(
     momentum_definition: str,
     reversal_filter_params=None,
     engine="simple",
-    book_values: dict[str, float | None] | None = None,
+    book_values: BookValuesInput = None,
 ) -> dict[str, object]:
     if momentum_definition != "90d":
         return evaluate_weight_tuple(
@@ -282,7 +297,7 @@ def evaluate_weight_tuple(
     evaluation_end: str | None = None,
     reversal_filter_params=None,
     engine="backtrader",
-    book_values: dict[str, float | None] | None = None,
+    book_values: BookValuesInput = None,
     roe_values: dict[str, float | None] | None = None,
 ) -> dict[str, float]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
@@ -292,6 +307,7 @@ def evaluate_weight_tuple(
 
     w_val = weights[3] if len(weights) > 3 else 0.0
     w_qual = weights[4] if len(weights) > 4 else 0.0
+    score_book_values = _resolve_book_values(book_values, eval_end)
 
     warmup_bars = max(DEFAULT_LOOKBACK_MOM, DEFAULT_LOOKBACK_VOL, DEFAULT_LOOKBACK_REV)
     window_dfs = _slice_window_data(data_dfs, start, end, warmup_bars=warmup_bars)
@@ -318,7 +334,7 @@ def evaluate_weight_tuple(
             weight_rev=weights[2],
             weight_val=w_val, weight_qual=w_qual, roe_values=roe_values,
             momentum_definition=momentum_definition,
-            book_values=book_values,
+            book_values=score_book_values,
         )
     else:
         scores = score_universe(
@@ -327,7 +343,7 @@ def evaluate_weight_tuple(
             weight_vol=weights[1],
             weight_rev=weights[2],
             weight_val=w_val, weight_qual=w_qual, roe_values=roe_values,
-            book_values=book_values,
+            book_values=score_book_values,
         )
 
     if reversal_filter_params is not None:
@@ -463,7 +479,7 @@ def run_walk_forward_optimization(
     local_allowed_validation_statuses: tuple[str, ...] = ("ok",),
     reversal_filter_params=None,
     engine="simple",
-    book_values: dict[str, float | None] | None = None,
+    book_values: BookValuesInput = None,
     optimizer: str = "grid",
     n_factors: int = 4,
 ) -> dict[str, object]:
@@ -888,7 +904,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # Fetch book values for value factor (semi-static annual data)
     from src.data.fundamental_loader import get_book_values
-    book_values = get_book_values(symbols, as_of_date=pd.Timestamp(args.end))
+    book_value_cache: dict[str, dict[str, float | None]] = {}
+
+    def book_values(as_of_date: pd.Timestamp) -> dict[str, float | None]:
+        key = pd.Timestamp(as_of_date).strftime("%Y-%m-%d")
+        if key not in book_value_cache:
+            book_value_cache[key] = get_book_values(symbols, as_of_date=pd.Timestamp(key))
+        return book_value_cache[key]
 
     try:
         run_walk_forward_optimization(

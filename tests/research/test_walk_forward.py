@@ -207,6 +207,30 @@ def test_evaluate_weight_tuple_uses_prior_history_to_warm_up_short_evaluation_wi
     assert metrics["symbol_returns"]
 
 
+def test_evaluate_weight_tuple_accepts_book_value_provider_for_simple_engine():
+    index = pd.bdate_range("2024-01-01", "2024-07-03")
+    data_dfs = {
+        "AAA.T": pd.DataFrame({"Close": [100.0] * len(index)}, index=index),
+        "BBB.T": pd.DataFrame({"Close": [100.0] * len(index)}, index=index),
+    }
+
+    def book_values_as_of(as_of_date):
+        if pd.Timestamp(as_of_date) < pd.Timestamp("2024-07-01"):
+            return {"AAA.T": 100.0, "BBB.T": 50.0}
+        return {"AAA.T": 50.0, "BBB.T": 100.0}
+
+    metrics = optimize.evaluate_weight_tuple(
+        data_dfs=data_dfs,
+        start="2024-06-03",
+        end="2024-07-03",
+        weights=(0.0, 0.0, 0.0, 1.0),
+        engine="simple",
+        book_values=book_values_as_of,
+    )
+
+    assert metrics["scores"].iloc[0]["symbol"] == "BBB.T"
+
+
 def test_evaluate_weight_tuple_uses_research_momentum_definition_in_execution(monkeypatch):
     class RankingStrategy(bt.Strategy):
         params = dict(

@@ -6,10 +6,18 @@ equal dollar allocation, 5bp fee per side.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+
 import numpy as np
 import pandas as pd
 
 from src.scoring.multi_factor import score_universe
+
+BookValuesInput = (
+    Mapping[str, float | None]
+    | Callable[[pd.Timestamp], Mapping[str, float | None] | None]
+    | None
+)
 
 
 def _first_trading_days(data_dfs: dict[str, pd.DataFrame]) -> pd.DatetimeIndex:
@@ -24,6 +32,15 @@ def _first_trading_days(data_dfs: dict[str, pd.DataFrame]) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(first_days.values)
 
 
+def _resolve_book_values(
+    book_values: BookValuesInput,
+    as_of_date: pd.Timestamp,
+) -> Mapping[str, float | None] | None:
+    if callable(book_values):
+        return book_values(as_of_date)
+    return book_values
+
+
 def run_backtest_simple(
     data_dfs: dict[str, pd.DataFrame],
     start: str,
@@ -36,7 +53,7 @@ def run_backtest_simple(
     reversal_filter_params=None,
     evaluation_start: str | None = None,
     evaluation_end: str | None = None,
-    book_values: dict[str, float | None] | None = None,
+    book_values: BookValuesInput = None,
     roe_values: dict[str, float | None] | None = None,
     industry_map: dict[str, str] | None = None,
 ) -> dict:
@@ -73,19 +90,20 @@ def run_backtest_simple(
             continue
 
         try:
+            effective_book_values = _resolve_book_values(book_values, exec_date)
             if momentum_definition != "90d":
                 from src.research.research_scoring import score_research_universe
                 scored = score_research_universe(
                     window_dfs, top_n=top_n,
                     weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
-                    weight_val=w_val, weight_qual=w_qual, book_values=book_values, roe_values=roe_values,
+                    weight_val=w_val, weight_qual=w_qual, book_values=effective_book_values, roe_values=roe_values,
                     momentum_definition=momentum_definition,
                 )
             else:
                 scored = score_universe(
                     window_dfs, top_n=top_n,
                     weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
-                    weight_val=w_val, weight_qual=w_qual, book_values=book_values, roe_values=roe_values,
+                    weight_val=w_val, weight_qual=w_qual, book_values=effective_book_values, roe_values=roe_values,
                     industry_map=industry_map,
                 )
         except ValueError:

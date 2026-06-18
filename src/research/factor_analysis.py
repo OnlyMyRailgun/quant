@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,21 @@ from src.scoring.multi_factor import (
     DEFAULT_LOOKBACK_VOL,
     DEFAULT_LOOKBACK_REV,
 )
+
+BookValuesInput = (
+    Mapping[str, float | None]
+    | Callable[[pd.Timestamp], Mapping[str, float | None] | None]
+    | None
+)
+
+
+def _resolve_book_values(
+    book_values: BookValuesInput,
+    as_of_date: pd.Timestamp,
+) -> Mapping[str, float | None] | None:
+    if callable(book_values):
+        return book_values(as_of_date)
+    return book_values
 
 
 def build_alphalens_factor_data(
@@ -84,7 +100,7 @@ def run_factor_analysis(
     weight_rev: float = 1.0,
     weight_val: float = 0.0,
     weight_qual: float = 0.0,
-    book_values: dict[str, float | None] | None = None,
+    book_values: BookValuesInput = None,
     roe_values: dict[str, float | None] | None = None,
     momentum_definition: str = "90d",
     artifact_dir: str | Path | None = None,
@@ -126,6 +142,7 @@ def run_factor_analysis(
             continue
 
         try:
+            effective_book_values = _resolve_book_values(book_values, date)
             if momentum_definition != "90d":
                 from src.research.research_scoring import score_research_universe
                 scored = score_research_universe(
@@ -134,7 +151,7 @@ def run_factor_analysis(
                     weight_rev=weight_rev, weight_val=weight_val,
                     weight_qual=weight_qual,
                     momentum_definition=momentum_definition,
-                    book_values=book_values,
+                    book_values=effective_book_values,
                 )
             else:
                 scored = score_universe(
@@ -142,7 +159,7 @@ def run_factor_analysis(
                     weight_mom=weight_mom, weight_vol=weight_vol,
                     weight_rev=weight_rev, weight_val=weight_val,
                     weight_qual=weight_qual,
-                    book_values=book_values, roe_values=roe_values,
+                    book_values=effective_book_values, roe_values=roe_values,
                 )
         except ValueError:
             continue
@@ -342,7 +359,13 @@ def main(argv: list[str] | None = None) -> int:
     book_values = None
     if args.weight_val > 0.0:
         from src.data.fundamental_loader import get_book_values
-        book_values = get_book_values(symbols, as_of_date=end)
+        book_value_cache: dict[str, dict[str, float | None]] = {}
+
+        def book_values(as_of_date: pd.Timestamp) -> dict[str, float | None]:
+            key = pd.Timestamp(as_of_date).strftime("%Y-%m-%d")
+            if key not in book_value_cache:
+                book_value_cache[key] = get_book_values(symbols, as_of_date=pd.Timestamp(key))
+            return book_value_cache[key]
 
     try:
         result = run_factor_analysis(
