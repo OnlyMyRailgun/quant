@@ -64,3 +64,16 @@ class TestRunBacktestVectorbt:
         )
 
         assert result_full["return_pct"] != result_eval["return_pct"]
+
+    def test_run_backtest_vectorbt_rejects_nonzero_slippage_until_side_aware_orders_exist(self):
+        """Non-zero slippage must not be silently accepted if it is not modeled."""
+        data = make_price_df(["AAPL", "GOOGL", "MSFT"], 120)
+
+        with pytest.raises(NotImplementedError, match="slippage"):
+            run_backtest_vectorbt(
+                data_dfs=data,
+                start="2024-05-01",
+                end="2024-06-10",
+                weights=(1.0, 1.0, 1.0),
+                slippage_pct=0.001,
+            )

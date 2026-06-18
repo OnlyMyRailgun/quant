@@ -356,7 +356,7 @@ def evaluate_weight_tuple(
             top_n=3,
             initial_cash=STARTING_CASH,
             commission_rate=0.001,
-            slippage_pct=0.0005,
+            slippage_pct=0.0,
             momentum_definition=momentum_definition,
             reversal_filter_params=reversal_filter_params,
             evaluation_start=eval_start,

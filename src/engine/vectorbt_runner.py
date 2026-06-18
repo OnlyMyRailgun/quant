@@ -20,7 +20,7 @@ def run_backtest_vectorbt(
     top_n: int = 3,
     initial_cash: float = 1_000_000.0,
     commission_rate: float = 0.001,
-    slippage_pct: float = 0.0005,
+    slippage_pct: float = 0.0,
     momentum_definition: str = "90d",
     reversal_filter_params=None,
     evaluation_start: str | None = None,
@@ -45,7 +45,9 @@ def run_backtest_vectorbt(
     commission_rate : float
         Commission rate as a decimal (e.g. 0.001 = 10bp).
     slippage_pct : float
-        Slippage as a decimal applied to execution price.
+        Slippage as a decimal. Non-zero slippage is not supported in this
+        target-percent vectorbt path because order side is not known before
+        portfolio construction.
     momentum_definition : str
         "90d" or "12_1".
     reversal_filter_params : optional
@@ -61,6 +63,12 @@ def run_backtest_vectorbt(
         Metrics dict with keys: return_pct, sharpe, drawdown, symbol_returns, scores.
     """
     import vectorbt as vbt
+
+    if slippage_pct != 0.0:
+        raise NotImplementedError(
+            "vectorbt target-percent runner does not support side-aware slippage; "
+            "use slippage_pct=0.0 or the simple engine for realistic execution"
+        )
 
     # ------------------------------------------------------------------
     # 1. Determine lookback days

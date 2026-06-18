@@ -19,8 +19,8 @@ def build_orders(
     commission_rate : float
         Commission rate as a decimal (e.g. 0.001 = 10bp).
     slippage_pct : float
-        Slippage as a decimal applied to execution price
-        (execution_price = price * (1 - slippage_pct)).
+        Reserved for API compatibility. The vectorbt target-percent runner
+        rejects non-zero slippage because order side is not known here.
 
     Returns
     -------

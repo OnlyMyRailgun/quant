@@ -78,9 +78,7 @@ def run_backtest(
         start = earliest.strftime("%Y-%m-%d")
         end = latest.strftime("%Y-%m-%d")
 
-        effective_slippage = (
-            slippage if slippage is not None else load_live_slippage()
-        )
+        effective_slippage = slippage if slippage is not None else 0.0
 
         result = run_backtest_vectorbt(
             data_dfs=data_dfs,
