@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import sys
 from collections.abc import Callable, Mapping
 from itertools import product
@@ -60,6 +61,59 @@ def _resolve_book_values(
     if callable(book_values):
         return book_values(pd.Timestamp(as_of_date))
     return book_values
+
+
+def _call_evaluate_weight_tuple(
+    data_dfs: dict[str, pd.DataFrame],
+    start: str,
+    end: str,
+    weights: tuple[float, ...],
+    **kwargs,
+) -> dict[str, object]:
+    evaluator = evaluate_weight_tuple
+    try:
+        signature = inspect.signature(evaluator)
+    except (TypeError, ValueError):
+        return evaluator(data_dfs, start, end, weights, **kwargs)
+
+    accepts_var_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+    if not accepts_var_kwargs:
+        kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key in signature.parameters
+        }
+
+    return evaluator(data_dfs, start, end, weights, **kwargs)
+
+
+def _strategy_param_names(strategy_class) -> set[str]:
+    params = getattr(strategy_class, "params", None)
+    if params is None:
+        return set()
+    if isinstance(params, Mapping):
+        return set(params)
+    if hasattr(params, "_getkeys"):
+        return set(params._getkeys())
+    return {
+        name
+        for name in dir(params)
+        if not name.startswith("_")
+    }
+
+
+def _filter_strategy_kwargs(strategy_class, kwargs: dict[str, object]) -> dict[str, object]:
+    param_names = _strategy_param_names(strategy_class)
+    if not param_names:
+        return {}
+    return {
+        key: value
+        for key, value in kwargs.items()
+        if key in param_names
+    }
 
 
 class SymbolReturnAnalyzer(bt.Analyzer):
@@ -241,32 +295,19 @@ def _evaluate_weight_tuple_with_momentum(
     reversal_filter_params=None,
     engine="simple",
     book_values: BookValuesInput = None,
+    top_n: int = 3,
 ) -> dict[str, object]:
-    if momentum_definition != "90d":
-        return evaluate_weight_tuple(
-            data_dfs,
-            start,
-            end,
-            weights,
-            momentum_definition=momentum_definition,
-            reversal_filter_params=reversal_filter_params,
-            engine=engine,
-        )
-
-    try:
-        return evaluate_weight_tuple(
-            data_dfs,
-            start,
-            end,
-            weights,
-            momentum_definition=momentum_definition,
-            reversal_filter_params=reversal_filter_params,
-            engine=engine,
-        )
-    except TypeError as exc:
-        if "momentum_definition" not in str(exc):
-            raise
-        return evaluate_weight_tuple(data_dfs, start, end, weights)
+    return _call_evaluate_weight_tuple(
+        data_dfs,
+        start,
+        end,
+        weights,
+        momentum_definition=momentum_definition,
+        reversal_filter_params=reversal_filter_params,
+        engine=engine,
+        book_values=book_values,
+        top_n=top_n,
+    )
 
 
 def _build_execution_strategy_class(momentum_definition: str):
@@ -299,6 +340,7 @@ def evaluate_weight_tuple(
     engine="backtrader",
     book_values: BookValuesInput = None,
     roe_values: dict[str, float | None] | None = None,
+    top_n: int = 3,
 ) -> dict[str, float]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -318,6 +360,7 @@ def evaluate_weight_tuple(
             weight_vol=weights[1],
             weight_rev=weights[2],
             weight_val=w_val, weight_qual=w_qual, roe_values=roe_values,
+            top_n=top_n,
         )
         return {
             "return_pct": 0.0,
@@ -329,6 +372,7 @@ def evaluate_weight_tuple(
     if momentum_definition == "12_1":
         scores = score_research_universe(
             window_dfs,
+            top_n=top_n,
             weight_mom=weights[0],
             weight_vol=weights[1],
             weight_rev=weights[2],
@@ -339,6 +383,7 @@ def evaluate_weight_tuple(
     else:
         scores = score_universe(
             window_dfs,
+            top_n=top_n,
             weight_mom=weights[0],
             weight_vol=weights[1],
             weight_rev=weights[2],
@@ -355,7 +400,7 @@ def evaluate_weight_tuple(
         from src.engine.simple_runner import run_backtest_simple
         return run_backtest_simple(
             data_dfs=data_dfs, start=start, end=end,
-            weights=weights, top_n=3,
+            weights=weights, top_n=top_n,
             momentum_definition=momentum_definition,
             reversal_filter_params=reversal_filter_params,
             evaluation_start=eval_start, evaluation_end=eval_end,
@@ -369,7 +414,7 @@ def evaluate_weight_tuple(
             start=start,
             end=end,
             weights=weights,
-            top_n=3,
+            top_n=top_n,
             initial_cash=STARTING_CASH,
             commission_rate=0.001,
             slippage_pct=0.0,
@@ -386,6 +431,7 @@ def evaluate_weight_tuple(
         "weight_mom": weights[0],
         "weight_vol": weights[1],
         "weight_rev": weights[2],
+        "top_n": top_n,
     }
     if reversal_filter_params is not None:
         strategy_kwargs["reversal_filter_params"] = reversal_filter_params
@@ -393,7 +439,7 @@ def evaluate_weight_tuple(
     cerebro = bt.Cerebro()
     cerebro.addstrategy(
         strategy_class,
-        **strategy_kwargs,
+        **_filter_strategy_kwargs(strategy_class, strategy_kwargs),
     )
 
     for symbol, df in window_dfs.items():
@@ -482,6 +528,7 @@ def run_walk_forward_optimization(
     book_values: BookValuesInput = None,
     optimizer: str = "grid",
     n_factors: int = 4,
+    top_n: int = 3,
 ) -> dict[str, object]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -558,7 +605,7 @@ def run_walk_forward_optimization(
                 window["train_start"],
                 window["train_end"],
             )
-            return evaluate_weight_tuple(
+            return _call_evaluate_weight_tuple(
                 window_dfs,
                 slice_start,
                 window["train_end"],
@@ -569,6 +616,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
                 book_values=book_values,
+                top_n=top_n,
             )
 
         def evaluate_validation_window(window, weights):
@@ -577,7 +625,7 @@ def run_walk_forward_optimization(
                 window["validation_start"],
                 window["validation_end"],
             )
-            metrics = evaluate_weight_tuple(
+            metrics = _call_evaluate_weight_tuple(
                 window_dfs,
                 slice_start,
                 window["validation_end"],
@@ -585,8 +633,10 @@ def run_walk_forward_optimization(
                 momentum_definition=momentum_definition,
                 evaluation_start=window["validation_start"],
                 evaluation_end=window["validation_end"],
+                reversal_filter_params=reversal_filter_params,
                 engine=engine,
                 book_values=book_values,
+                top_n=top_n,
             )
             metrics = metrics | _build_validation_participation_metrics(
                 data_dfs=window_dfs,
@@ -602,7 +652,7 @@ def run_walk_forward_optimization(
                 window["validation_start"],
                 window["validation_end"],
             )
-            return evaluate_weight_tuple(
+            return _call_evaluate_weight_tuple(
                 window_dfs,
                 slice_start,
                 window["validation_end"],
@@ -612,11 +662,13 @@ def run_walk_forward_optimization(
                 evaluation_end=window["validation_end"],
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
+                book_values=book_values,
+                top_n=top_n,
             )
 
         def evaluate_one_shot_training_window(weights):
             window_dfs, slice_start = _load_local_window(universe_symbols, start, end)
-            return evaluate_weight_tuple(
+            return _call_evaluate_weight_tuple(
                 window_dfs,
                 slice_start,
                 end,
@@ -626,6 +678,8 @@ def run_walk_forward_optimization(
                 evaluation_end=end,
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
+                book_values=book_values,
+                top_n=top_n,
             )
 
         def evaluate_one_shot_validation_window(window, weights):
@@ -634,7 +688,7 @@ def run_walk_forward_optimization(
                 window["validation_start"],
                 window["validation_end"],
             )
-            return evaluate_weight_tuple(
+            return _call_evaluate_weight_tuple(
                 window_dfs,
                 slice_start,
                 window["validation_end"],
@@ -644,6 +698,8 @@ def run_walk_forward_optimization(
                 evaluation_end=window["validation_end"],
                 reversal_filter_params=reversal_filter_params,
                 engine=engine,
+                book_values=book_values,
+                top_n=top_n,
             )
 
     else:
@@ -657,6 +713,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
                 engine=engine,
+                top_n=top_n,
             )
 
         def evaluate_validation_window(window, weights):
@@ -669,6 +726,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
                 engine=engine,
+                top_n=top_n,
             ) | _build_validation_participation_metrics(
                 data_dfs=data_dfs,
                 universe_symbols=universe_symbols,
@@ -686,6 +744,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
                 engine=engine,
+                top_n=top_n,
             )
 
         def evaluate_one_shot_training_window(weights):
@@ -698,6 +757,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
                 engine=engine,
+                top_n=top_n,
             )
 
         def evaluate_one_shot_validation_window(window, weights):
@@ -710,6 +770,7 @@ def run_walk_forward_optimization(
                 reversal_filter_params=reversal_filter_params,
                 book_values=book_values,
                 engine=engine,
+                top_n=top_n,
             )
 
     result = run_walk_forward_experiment(
@@ -852,6 +913,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Weight optimization method (default: grid)")
     parser.add_argument("--optuna-trials", type=int, default=50,
                         help="Number of Optuna trials per window (default: 50)")
+    parser.add_argument("--top-n", type=int, default=3,
+                        help="Number of stocks to hold in each rebalance (default: 3)")
     return parser
 
 
@@ -936,6 +999,7 @@ def main(argv: list[str] | None = None) -> int:
             book_values=book_values,
             optimizer=args.optimizer,
             n_factors=4,
+            top_n=args.top_n,
         )
     except local_store.LocalDataSyncRequiredError as exc:
         print(f"Local data sync required: {exc}")

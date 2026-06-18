@@ -32,6 +32,32 @@ def _first_trading_days(data_dfs: dict[str, pd.DataFrame]) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(first_days.values)
 
 
+def _all_trading_days(data_dfs: dict[str, pd.DataFrame]) -> pd.DatetimeIndex:
+    all_dates = set()
+    for df in data_dfs.values():
+        if df is not None and not df.empty:
+            all_dates.update(df.index)
+    return pd.DatetimeIndex(sorted(all_dates))
+
+
+def _price_on_or_after(df: pd.DataFrame, date: pd.Timestamp) -> float | None:
+    if df is None or df.empty or "Close" not in df.columns:
+        return None
+    mask = df.index >= date
+    if not mask.any():
+        return None
+    return float(df.loc[mask, "Close"].iloc[0])
+
+
+def _price_on_or_before(df: pd.DataFrame, date: pd.Timestamp) -> float | None:
+    if df is None or df.empty or "Close" not in df.columns:
+        return None
+    mask = df.index <= date
+    if not mask.any():
+        return None
+    return float(df.loc[mask, "Close"].iloc[-1])
+
+
 def _resolve_book_values(
     book_values: BookValuesInput,
     as_of_date: pd.Timestamp,
@@ -74,92 +100,103 @@ def run_backtest_simple(
 
     cash = initial_cash
     holdings: dict[str, tuple[int, float]] = {}
+    realized_pnl: dict[str, float] = {}
     records: list[tuple[pd.Timestamp, float]] = []
+    scored = pd.DataFrame()
 
-    for exec_date in exec_dates:
-        # Score using data strictly BEFORE the execution date
-        window_dfs = {}
-        for sym, df in data_dfs.items():
-            if df is None or df.empty:
-                continue
-            sliced = df.loc[df.index < exec_date]
-            if len(sliced) >= lookback:
-                window_dfs[sym] = sliced
+    trading_days = _all_trading_days(data_dfs)
+    trading_days = trading_days[
+        (trading_days >= pd.Timestamp(start))
+        & (trading_days <= pd.Timestamp(end))
+    ]
+    exec_date_set = set(exec_dates)
 
-        if not window_dfs:
-            continue
-
-        try:
-            effective_book_values = _resolve_book_values(book_values, exec_date)
-            if momentum_definition != "90d":
-                from src.research.research_scoring import score_research_universe
-                scored = score_research_universe(
-                    window_dfs, top_n=top_n,
-                    weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
-                    weight_val=w_val, weight_qual=w_qual, book_values=effective_book_values, roe_values=roe_values,
-                    momentum_definition=momentum_definition,
-                )
-            else:
-                scored = score_universe(
-                    window_dfs, top_n=top_n,
-                    weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
-                    weight_val=w_val, weight_qual=w_qual, book_values=effective_book_values, roe_values=roe_values,
-                    industry_map=industry_map,
-                )
-        except ValueError:
-            continue
-
-        if scored.empty:
-            continue
-
-        if reversal_filter_params is not None:
-            from src.research.reversal_filter import apply_reversal_filter
-            result = apply_reversal_filter(scored, window_dfs, reversal_filter_params)
-            scored = result["filtered_scores"]
-            if scored.empty:
-                continue
-
-        picks = scored[scored["is_top_n"]]["symbol"].tolist()
-
-        # Get execution prices (first bar on or after exec_date)
-        prices = {}
-        for sym in set(picks) | set(holdings.keys()):
-            df = data_dfs.get(sym)
-            if df is not None and "Close" in df.columns:
-                mask = df.index >= exec_date
-                if mask.any():
-                    prices[sym] = float(df.loc[mask, "Close"].iloc[0])
-
-        # Sell all current holdings
-        for sym in list(holdings.keys()):
-            if sym in prices:
-                shares, _ = holdings[sym]
-                cash += shares * prices[sym] * (1 - fee_rate)
-                del holdings[sym]
-
-        # Buy new picks with equal dollar allocation
-        holdings = {}
-        if picks and prices:
-            budget = cash * 0.95 / len(picks)
-            for sym in picks:
-                px = prices.get(sym)
-                if px and px > 0:
-                    shares = int(budget / px / 100) * 100
-                    cost = shares * px * (1 + fee_rate)
-                    cash -= cost
-                    holdings[sym] = (shares, px)
-
-        # Mark to market
+    def mark_equity(mark_date: pd.Timestamp) -> float:
         equity = cash
         for sym, (shares, _) in holdings.items():
-            if sym in prices:
-                equity += shares * prices[sym]
-        records.append((exec_date, equity))
+            px = _price_on_or_before(data_dfs.get(sym), mark_date)
+            if px is not None:
+                equity += shares * px
+        return equity
+
+    for current_date in trading_days:
+        if current_date in exec_date_set:
+            # Score using data strictly BEFORE the execution date
+            window_dfs = {}
+            for sym, df in data_dfs.items():
+                if df is None or df.empty:
+                    continue
+                sliced = df.loc[df.index < current_date]
+                if len(sliced) >= lookback:
+                    window_dfs[sym] = sliced
+
+            if window_dfs:
+                try:
+                    effective_book_values = _resolve_book_values(book_values, current_date)
+                    if momentum_definition != "90d":
+                        from src.research.research_scoring import score_research_universe
+                        scored = score_research_universe(
+                            window_dfs, top_n=top_n,
+                            weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
+                            weight_val=w_val, weight_qual=w_qual, book_values=effective_book_values, roe_values=roe_values,
+                            momentum_definition=momentum_definition,
+                        )
+                    else:
+                        scored = score_universe(
+                            window_dfs, top_n=top_n,
+                            weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
+                            weight_val=w_val, weight_qual=w_qual, book_values=effective_book_values, roe_values=roe_values,
+                            industry_map=industry_map,
+                        )
+                except ValueError:
+                    scored = pd.DataFrame()
+
+                if not scored.empty and reversal_filter_params is not None:
+                    from src.research.reversal_filter import apply_reversal_filter
+                    result = apply_reversal_filter(scored, window_dfs, reversal_filter_params)
+                    scored = result["filtered_scores"]
+
+                if not scored.empty:
+                    picks = scored[scored["is_top_n"]]["symbol"].tolist()
+
+                    prices = {
+                        sym: px
+                        for sym in set(picks) | set(holdings.keys())
+                        if (px := _price_on_or_after(data_dfs.get(sym), current_date)) is not None
+                    }
+
+                    # Sell current priced holdings before rebuilding equal-weight targets.
+                    for sym in list(holdings.keys()):
+                        if sym not in prices:
+                            continue
+                        shares, cost_basis = holdings.pop(sym)
+                        proceeds = shares * prices[sym] * (1 - fee_rate)
+                        cash += proceeds
+                        realized_pnl[sym] = realized_pnl.get(sym, 0.0) + proceeds - cost_basis
+
+                    if picks and prices:
+                        budget = cash * 0.95 / len(picks)
+                        for sym in picks:
+                            px = prices.get(sym)
+                            if px is None or px <= 0:
+                                continue
+                            shares = int(budget / px / 100) * 100
+                            if shares <= 0:
+                                continue
+                            cost = shares * px * (1 + fee_rate)
+                            cash -= cost
+                            if sym in holdings:
+                                old_shares, old_cost = holdings[sym]
+                                holdings[sym] = (old_shares + shares, old_cost + cost)
+                            else:
+                                holdings[sym] = (shares, cost)
+
+        records.append((current_date, mark_equity(current_date)))
 
     if not records:
         return {
             "return_pct": 0.0, "sharpe": 0.0, "drawdown": 0.0,
-            "symbol_returns": {}, "scores": scored if 'scored' in dir() else pd.DataFrame(),
+            "symbol_returns": [], "scores": scored,
         }
 
     # Slice to evaluation window
@@ -173,18 +210,31 @@ def run_backtest_simple(
     return_base = vals.iloc[0] if evaluation_start or evaluation_end else initial_cash
     total_return = (vals.iloc[-1] / return_base - 1) * 100 if return_base > 0 else 0.0
 
-    monthly_returns = vals.pct_change().dropna()
-    if len(monthly_returns) > 1 and monthly_returns.std() > 0:
-        sharpe = float(monthly_returns.mean() / monthly_returns.std() * np.sqrt(12))
+    daily_returns = vals.pct_change().dropna()
+    if len(daily_returns) > 1 and daily_returns.std() > 0:
+        sharpe = float(daily_returns.mean() / daily_returns.std() * np.sqrt(252))
     else:
         sharpe = 0.0
 
     drawdown = float((vals / vals.cummax() - 1).min()) * 100
+    symbol_returns = []
+    mark_date = eval_records[-1][0]
+    for sym in sorted(set(realized_pnl) | set(holdings)):
+        pnl = realized_pnl.get(sym, 0.0)
+        if sym in holdings:
+            shares, cost_basis = holdings[sym]
+            px = _price_on_or_before(data_dfs.get(sym), mark_date)
+            if px is not None:
+                pnl += shares * px - cost_basis
+        symbol_returns.append({
+            "symbol": sym,
+            "return_pct": round((pnl / initial_cash) * 100.0, 4) if initial_cash > 0 else 0.0,
+        })
 
     return {
         "return_pct": round(total_return, 4),
         "sharpe": round(sharpe, 4),
         "drawdown": round(drawdown, 4),
-        "symbol_returns": {},
-        "scores": scored if 'scored' in dir() else pd.DataFrame(),
+        "symbol_returns": symbol_returns,
+        "scores": scored,
     }

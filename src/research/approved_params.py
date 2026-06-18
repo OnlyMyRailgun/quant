@@ -72,6 +72,13 @@ def approve_walk_forward_params(
             "rev": float(row["weight_rev"]),
         },
     }
+    optional_weight_columns = {
+        "weight_val": "val",
+        "weight_qual": "qual",
+    }
+    for column, key in optional_weight_columns.items():
+        if column in row.index and not pd.isna(row[column]):
+            approved["weights"][key] = float(row[column])
 
     approved_path = Path(artifact_dir) / DEFAULT_APPROVED_PARAMS_FILE
     approved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -160,15 +167,31 @@ def resolve_approved_weight_values(
     weight_mom: float | None,
     weight_vol: float | None,
     weight_rev: float | None,
-    fallback: tuple[float, float, float],
+    fallback: tuple[float, ...],
+    weight_val: float | None = None,
+    weight_qual: float | None = None,
 ) -> dict[str, float]:
     approved = None
     if artifact_dir is not None:
         approved = load_approved_paper_trading_params(Path(artifact_dir))
 
     approved_weights = approved["weights"] if approved is not None else {}
-    return {
+    resolved = {
         "mom": float(approved_weights.get("mom", fallback[0])) if weight_mom is None else weight_mom,
         "vol": float(approved_weights.get("vol", fallback[1])) if weight_vol is None else weight_vol,
         "rev": float(approved_weights.get("rev", fallback[2])) if weight_rev is None else weight_rev,
     }
+
+    optional_weights = (
+        ("val", weight_val, 3),
+        ("qual", weight_qual, 4),
+    )
+    for key, explicit_value, fallback_index in optional_weights:
+        if explicit_value is not None:
+            resolved[key] = float(explicit_value)
+        elif key in approved_weights:
+            resolved[key] = float(approved_weights[key])
+        elif len(fallback) > fallback_index:
+            resolved[key] = float(fallback[fallback_index])
+
+    return resolved

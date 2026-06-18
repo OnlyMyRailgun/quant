@@ -80,7 +80,7 @@ def run_backtest_vectorbt(
             DEFAULT_LOOKBACK_MOM, DEFAULT_LOOKBACK_VOL, DEFAULT_LOOKBACK_REV
         )
 
-    weight_mom, weight_vol, weight_rev = weights
+    weight_mom, weight_vol, weight_rev = weights[:3]
 
     # ------------------------------------------------------------------
     # 2. Generate execution dates (month-start = BMS)

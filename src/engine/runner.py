@@ -1,7 +1,79 @@
 import backtrader as bt
 import pandas as pd
-from typing import Type, Dict, Any
+from collections.abc import Mapping
+from typing import Dict, Any
 from src.engine.commission import JapanStockCommission, load_live_slippage
+
+
+def _strategy_param_names(strategy_class) -> set[str]:
+    params = getattr(strategy_class, "params", None)
+    if params is None:
+        return set()
+    if isinstance(params, Mapping):
+        return set(params)
+    if hasattr(params, "_getkeys"):
+        return set(params._getkeys())
+    return {
+        name
+        for name in dir(params)
+        if not name.startswith("_")
+    }
+
+
+def _filter_strategy_kwargs(strategy_class, kwargs: dict[str, Any]) -> dict[str, Any]:
+    param_names = _strategy_param_names(strategy_class)
+    if not param_names:
+        return {}
+    return {
+        key: value
+        for key, value in kwargs.items()
+        if key in param_names
+    }
+
+
+def _strategy_param_value(
+    strategy_class,
+    strategy_kwargs: dict[str, Any],
+    name: str,
+    default,
+):
+    if name in strategy_kwargs:
+        return strategy_kwargs[name]
+    params = getattr(strategy_class, "params", None)
+    return getattr(params, name, default) if params is not None else default
+
+
+def _date_bounds(
+    data_dfs: dict[str, pd.DataFrame],
+    start: str | None,
+    end: str | None,
+) -> tuple[str, str]:
+    if start is not None and end is not None:
+        return start, end
+
+    date_indexes = [
+        df.index
+        for df in data_dfs.values()
+        if df is not None and not df.empty and isinstance(df.index, pd.DatetimeIndex)
+    ]
+    if not date_indexes:
+        raise ValueError("run_backtest requires datetime-indexed data or explicit start/end")
+
+    inferred_start = min(index.min() for index in date_indexes).strftime("%Y-%m-%d")
+    inferred_end = max(index.max() for index in date_indexes).strftime("%Y-%m-%d")
+    return start or inferred_start, end or inferred_end
+
+
+def _execution_params(strategy_class, strategy_kwargs: dict[str, Any]) -> tuple[int, tuple[float, ...]]:
+    top_n = int(_strategy_param_value(strategy_class, strategy_kwargs, "top_n", 3))
+    weights = (
+        float(_strategy_param_value(strategy_class, strategy_kwargs, "weight_mom", 1.0)),
+        float(_strategy_param_value(strategy_class, strategy_kwargs, "weight_vol", 1.0)),
+        float(_strategy_param_value(strategy_class, strategy_kwargs, "weight_rev", 1.0)),
+        float(_strategy_param_value(strategy_class, strategy_kwargs, "weight_val", 0.0)),
+        float(_strategy_param_value(strategy_class, strategy_kwargs, "weight_qual", 0.0)),
+    )
+    return top_n, weights
 
 def run_backtest(
     data_dfs: dict[str, pd.DataFrame],
@@ -12,6 +84,9 @@ def run_backtest(
     engine="backtrader",
     momentum_definition="90d",
     reversal_filter_params=None,
+    start: str | None = None,
+    end: str | None = None,
+    strategy_kwargs: dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Sets up and runs a short backtest using Backtrader or Vectorbt.
@@ -26,25 +101,25 @@ def run_backtest(
         engine: Backtesting engine ("backtrader" or "vectorbt").
         momentum_definition: Momentum definition ("90d" or "12_1").
         reversal_filter_params: Optional reversal filter parameters.
+        start: Optional explicit backtest start date for non-Backtrader engines.
+        end: Optional explicit backtest end date for non-Backtrader engines.
+        strategy_kwargs: Optional strategy parameter overrides.
     """
+    strategy_kwargs = dict(strategy_kwargs or {})
+
     if engine == "simple":
         from src.engine.simple_runner import run_backtest_simple
 
-        params = getattr(strategy_class, "params", None)
-        top_n = getattr(params, "top_n", 3) if params is not None else 3
-        weight_mom = getattr(params, "weight_mom", 1.0) if params is not None else 1.0
-        weight_vol = getattr(params, "weight_vol", 1.0) if params is not None else 1.0
-        weight_rev = getattr(params, "weight_rev", 1.0) if params is not None else 1.0
-
-        earliest = min(df.index.min() for df in data_dfs.values() if not df.empty)
-        latest = max(df.index.max() for df in data_dfs.values() if not df.empty)
+        top_n, weights = _execution_params(strategy_class, strategy_kwargs)
+        start_date, end_date = _date_bounds(data_dfs, start, end)
 
         result = run_backtest_simple(
             data_dfs=data_dfs,
-            start=earliest.strftime("%Y-%m-%d"),
-            end=latest.strftime("%Y-%m-%d"),
-            weights=(weight_mom, weight_vol, weight_rev),
+            start=start_date,
+            end=end_date,
+            weights=weights,
             top_n=top_n,
+            initial_cash=initial_cash,
             momentum_definition=momentum_definition,
             reversal_filter_params=reversal_filter_params,
         )
@@ -63,28 +138,16 @@ def run_backtest(
     if engine == "vectorbt":
         from src.engine.vectorbt_runner import run_backtest_vectorbt
 
-        params = getattr(strategy_class, "params", None)
-        top_n = getattr(params, "top_n", 3) if params is not None else 3
-        weight_mom = getattr(params, "weight_mom", 1.0) if params is not None else 1.0
-        weight_vol = getattr(params, "weight_vol", 1.0) if params is not None else 1.0
-        weight_rev = getattr(params, "weight_rev", 1.0) if params is not None else 1.0
-
-        earliest = min(
-            df.index.min() for df in data_dfs.values() if not df.empty
-        )
-        latest = max(
-            df.index.max() for df in data_dfs.values() if not df.empty
-        )
-        start = earliest.strftime("%Y-%m-%d")
-        end = latest.strftime("%Y-%m-%d")
+        top_n, weights = _execution_params(strategy_class, strategy_kwargs)
+        start_date, end_date = _date_bounds(data_dfs, start, end)
 
         effective_slippage = slippage if slippage is not None else 0.0
 
         result = run_backtest_vectorbt(
             data_dfs=data_dfs,
-            start=start,
-            end=end,
-            weights=(weight_mom, weight_vol, weight_rev),
+            start=start_date,
+            end=end_date,
+            weights=weights,
             top_n=top_n,
             initial_cash=initial_cash,
             commission_rate=commission,
@@ -108,7 +171,10 @@ def run_backtest(
     cerebro = bt.Cerebro()
     
     # Add Strategy
-    cerebro.addstrategy(strategy_class)
+    cerebro.addstrategy(
+        strategy_class,
+        **_filter_strategy_kwargs(strategy_class, strategy_kwargs),
+    )
     
     # Add each symbol's data as a separate feed
     for symbol, df in data_dfs.items():

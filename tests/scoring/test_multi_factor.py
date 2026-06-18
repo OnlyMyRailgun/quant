@@ -179,3 +179,26 @@ def test_calculate_current_signals_falls_back_when_no_approved_params_exist(tmp_
 
     assert winners["symbol"].tolist() == expected["symbol"].tolist()
     assert winners["total_score"].tolist() == expected["total_score"].tolist()
+
+
+def test_calculate_current_signals_applies_quality_factor_with_12_1_momentum():
+    dates = pd.date_range("2021-01-01", periods=300, freq="D")
+    flat = pd.DataFrame({"Close": [100.0] * len(dates)}, index=dates)
+    data = {
+        "LOW_ROE.T": flat.copy(),
+        "HIGH_ROE.T": flat.copy(),
+    }
+
+    winners = calculate_current_signals(
+        data,
+        top_n=1,
+        weight_mom=0.0,
+        weight_vol=0.0,
+        weight_rev=0.0,
+        weight_qual=1.0,
+        momentum_definition="12_1",
+        roe_values={"LOW_ROE.T": 0.02, "HIGH_ROE.T": 0.20},
+    )
+
+    assert winners["symbol"].tolist() == ["HIGH_ROE.T"]
+    assert "qual_contribution" in winners.columns

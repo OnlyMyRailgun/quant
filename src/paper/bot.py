@@ -86,8 +86,10 @@ def _build_signal_run(
             weight_vol=weight_vol,
             weight_rev=weight_rev,
             weight_val=weight_val,
+            weight_qual=weight_qual,
             momentum_definition=momentum_definition,
             book_values=book_values,
+            roe_values=roe_values,
         )
         return ranked
     ranked = score_universe(

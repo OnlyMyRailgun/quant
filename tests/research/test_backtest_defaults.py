@@ -50,6 +50,28 @@ def test_resolve_multi_factor_weights_respects_explicit_cli_overrides(tmp_path: 
     assert weights == {"weight_mom": 1.0, "weight_vol": 1.0, "weight_rev": 0.0}
 
 
+def test_resolve_multi_factor_weights_preserves_optional_value_quality_weights(tmp_path: Path):
+    write_approved_params(
+        tmp_path,
+        {"mom": 0.5, "vol": 1.0, "rev": 0.5, "val": 0.25, "qual": 0.75},
+    )
+
+    weights = resolve_multi_factor_weights(
+        artifact_dir=tmp_path,
+        weight_mom=None,
+        weight_vol=None,
+        weight_rev=None,
+    )
+
+    assert weights == {
+        "weight_mom": 0.5,
+        "weight_vol": 1.0,
+        "weight_rev": 0.5,
+        "weight_val": 0.25,
+        "weight_qual": 0.75,
+    }
+
+
 def test_backtest_and_paper_resolve_same_approved_weights(tmp_path: Path):
     write_approved_params(tmp_path, {"mom": 0.0, "vol": 1.0, "rev": 0.5})
 
@@ -174,17 +196,28 @@ def test_main_multi_factor_offline_smoke_uses_approved_params_and_skips_plot(mon
 
     captured = {}
 
-    class FakeCerebro:
-        def plot(self, *args, **kwargs):  # pragma: no cover - sanity guard
-            raise AssertionError("plot should not be called when --no-plot is set")
-
-    def fake_run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_000_000.0):
+    def fake_run_backtest(
+        data_dfs,
+        strategy_class,
+        initial_cash=1_000_000.0,
+        engine="backtrader",
+        momentum_definition="90d",
+        reversal_filter_params=None,
+        start=None,
+        end=None,
+        strategy_kwargs=None,
+    ):
         captured["data_symbols"] = sorted(data_dfs)
         captured["strategy_class"] = strategy_class.__name__
-        captured["kwargs_dict"] = kwargs_dict
         captured["initial_cash"] = initial_cash
-        return (
-            {
+        captured["engine"] = engine
+        captured["momentum_definition"] = momentum_definition
+        captured["reversal_filter_params"] = reversal_filter_params
+        captured["start"] = start
+        captured["end"] = end
+        captured["strategy_kwargs"] = strategy_kwargs
+        return {
+            "metrics": {
                 "final_value": 1_010_000.0,
                 "sharpe": 0.8,
                 "max_drawdown": 2.5,
@@ -192,10 +225,17 @@ def test_main_multi_factor_offline_smoke_uses_approved_params_and_skips_plot(mon
                 "position_change_count": 5,
                 "turnover_ratio": 0.6,
             },
-            FakeCerebro(),
-        )
+            "cerebro": object(),
+        }
 
-    monkeypatch.setattr(main, "run_with_logging", fake_run_with_logging)
+    monkeypatch.setattr(
+        main,
+        "run_with_logging",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("run_with_logging should not be called for default simple engine")
+        ),
+    )
+    monkeypatch.setattr(main, "run_backtest", fake_run_backtest, raising=False)
     monkeypatch.setattr(sys, "argv", ["main.py", "--strategy", "multi", "--universe", "--no-plot"])
 
     exit_code = main.main()
@@ -205,7 +245,13 @@ def test_main_multi_factor_offline_smoke_uses_approved_params_and_skips_plot(mon
     assert "Fetching data for 2 symbols from 2023-01-01 to 2024-01-01" in output
     assert captured["data_symbols"] == ["AAA.T", "BBB.T"]
     assert captured["strategy_class"] == "UniversalMultiFactor"
-    assert captured["kwargs_dict"] == {
+    assert captured["initial_cash"] == 1_000_000.0
+    assert captured["engine"] == "simple"
+    assert captured["momentum_definition"] == "90d"
+    assert captured["reversal_filter_params"] is None
+    assert captured["start"] == "2023-01-01"
+    assert captured["end"] == "2024-01-01"
+    assert captured["strategy_kwargs"] == {
         "weight_mom": 0.25,
         "weight_vol": 0.75,
         "weight_rev": 0.5,
@@ -213,7 +259,6 @@ def test_main_multi_factor_offline_smoke_uses_approved_params_and_skips_plot(mon
         "artifact_run_name": "backtest_rebalance",
         "universe_name": "topix_top_10",
     }
-    assert captured["initial_cash"] == 1_000_000.0
     assert fetch_calls == [
         {
             "symbols": ["AAA.T", "BBB.T"],
@@ -231,6 +276,84 @@ def test_main_multi_factor_offline_smoke_uses_approved_params_and_skips_plot(mon
         }
     ]
     assert len(screening_artifacts) == 1
+
+
+def test_main_simple_engine_uses_engine_dispatch_instead_of_logging(monkeypatch, tmp_path: Path):
+    write_approved_params(tmp_path, {"mom": 0.25, "vol": 0.75, "rev": 0.5})
+    monkeypatch.setattr(main, "DEFAULT_ARTIFACT_DIR", tmp_path)
+    monkeypatch.setattr(
+        main,
+        "fetch_universe",
+        lambda symbols, start, end: {
+            symbol: pd.DataFrame({"Close": [100.0, 101.0, 102.0]})
+            for symbol in symbols
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "run_with_logging",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("run_with_logging should not be called for --engine simple")
+        ),
+    )
+
+    captured = {}
+
+    def fake_run_backtest(
+        data_dfs,
+        strategy_class,
+        initial_cash=1_000_000.0,
+        engine="backtrader",
+        momentum_definition="90d",
+        reversal_filter_params=None,
+        start=None,
+        end=None,
+        strategy_kwargs=None,
+    ):
+        captured["data_symbols"] = sorted(data_dfs)
+        captured["strategy_class"] = strategy_class.__name__
+        captured["initial_cash"] = initial_cash
+        captured["engine"] = engine
+        captured["momentum_definition"] = momentum_definition
+        captured["reversal_filter_params"] = reversal_filter_params
+        captured["start"] = start
+        captured["end"] = end
+        captured["strategy_kwargs"] = strategy_kwargs
+        return {
+            "metrics": {
+                "final_value": 1_010_000.0,
+                "sharpe": 0.8,
+                "max_drawdown": 2.5,
+                "rebalance_count": 0,
+                "position_change_count": 0,
+                "turnover_ratio": 0.0,
+            },
+            "cerebro": object(),
+        }
+
+    monkeypatch.setattr(main, "run_backtest", fake_run_backtest, raising=False)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--strategy", "multi", "--engine", "simple", "--no-plot"])
+
+    exit_code = main.main()
+
+    assert exit_code is None
+    assert captured == {
+        "data_symbols": ["6758.T", "7203.T", "8306.T"],
+        "strategy_class": "UniversalMultiFactor",
+        "initial_cash": 1_000_000.0,
+        "engine": "simple",
+        "momentum_definition": "90d",
+        "reversal_filter_params": None,
+        "start": "2023-01-01",
+        "end": "2024-01-01",
+        "strategy_kwargs": {
+            "weight_mom": 0.25,
+            "weight_vol": 0.75,
+            "weight_rev": 0.5,
+            "artifact_dir": tmp_path,
+            "artifact_run_name": "backtest_rebalance",
+        },
+    }
 
 
 def test_main_multi_factor_filters_named_universe_with_screening(monkeypatch, tmp_path: Path, capsys):
@@ -302,13 +425,39 @@ def test_main_multi_factor_filters_named_universe_with_screening(monkeypatch, tm
 
     captured = {}
 
-    def fake_run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_000_000.0):
+    def fake_run_backtest(
+        data_dfs,
+        strategy_class,
+        initial_cash=1_000_000.0,
+        engine="backtrader",
+        momentum_definition="90d",
+        reversal_filter_params=None,
+        start=None,
+        end=None,
+        strategy_kwargs=None,
+    ):
         captured["data_symbols"] = list(data_dfs)
         captured["strategy_class"] = strategy_class.__name__
-        captured["kwargs_dict"] = kwargs_dict
-        return ({"final_value": 1_000_000.0, "sharpe": 0.0, "max_drawdown": 0.0}, object())
+        captured["initial_cash"] = initial_cash
+        captured["engine"] = engine
+        captured["momentum_definition"] = momentum_definition
+        captured["reversal_filter_params"] = reversal_filter_params
+        captured["start"] = start
+        captured["end"] = end
+        captured["strategy_kwargs"] = strategy_kwargs
+        return {
+            "metrics": {"final_value": 1_000_000.0, "sharpe": 0.0, "max_drawdown": 0.0},
+            "cerebro": object(),
+        }
 
-    monkeypatch.setattr(main, "run_with_logging", fake_run_with_logging)
+    monkeypatch.setattr(
+        main,
+        "run_with_logging",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("run_with_logging should not be called for default simple engine")
+        ),
+    )
+    monkeypatch.setattr(main, "run_backtest", fake_run_backtest, raising=False)
     monkeypatch.setattr(sys, "argv", ["main.py", "--strategy", "multi", "--universe-name", "custom_universe", "--no-plot"])
 
     exit_code = main.main()
@@ -318,6 +467,17 @@ def test_main_multi_factor_filters_named_universe_with_screening(monkeypatch, tm
     assert "Screening summary: requested=3 eligible=2 screened_out=1" in output
     assert captured["data_symbols"] == ["AAA.T", "CCC.T"]
     assert captured["strategy_class"] == "UniversalMultiFactor"
+    assert captured["engine"] == "simple"
+    assert captured["start"] == "2023-01-01"
+    assert captured["end"] == "2024-01-01"
+    assert captured["strategy_kwargs"] == {
+        "weight_mom": 0.25,
+        "weight_vol": 0.75,
+        "weight_rev": 0.5,
+        "artifact_dir": tmp_path,
+        "artifact_run_name": "backtest_rebalance",
+        "universe_name": "custom_universe",
+    }
     assert screening_calls == [
         {
             "candidate_symbols": ["AAA.T", "BBB.T", "CCC.T"],
@@ -447,11 +607,35 @@ def test_main_multi_factor_can_select_named_universe_without_affecting_default_t
     )
     captured = {}
 
-    def fake_run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_000_000.0):
-        captured["kwargs_dict"] = kwargs_dict
-        return ({"final_value": 1_000_000.0, "sharpe": 0.0, "max_drawdown": 0.0}, object())
+    def fake_run_backtest(
+        data_dfs,
+        strategy_class,
+        initial_cash=1_000_000.0,
+        engine="backtrader",
+        momentum_definition="90d",
+        reversal_filter_params=None,
+        start=None,
+        end=None,
+        strategy_kwargs=None,
+    ):
+        del data_dfs, strategy_class, initial_cash, momentum_definition, reversal_filter_params
+        captured["engine"] = engine
+        captured["start"] = start
+        captured["end"] = end
+        captured["strategy_kwargs"] = strategy_kwargs
+        return {
+            "metrics": {"final_value": 1_000_000.0, "sharpe": 0.0, "max_drawdown": 0.0},
+            "cerebro": object(),
+        }
 
-    monkeypatch.setattr(main, "run_with_logging", fake_run_with_logging)
+    monkeypatch.setattr(
+        main,
+        "run_with_logging",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("run_with_logging should not be called for default simple engine")
+        ),
+    )
+    monkeypatch.setattr(main, "run_backtest", fake_run_backtest, raising=False)
     monkeypatch.setattr(sys, "argv", ["main.py", "--strategy", "multi", "--universe-name", "custom_universe", "--no-plot"])
 
     exit_code = main.main()
@@ -466,7 +650,10 @@ def test_main_multi_factor_can_select_named_universe_without_affecting_default_t
             "end": "2024-01-01",
         }
     ]
-    assert captured["kwargs_dict"] == {
+    assert captured["engine"] == "simple"
+    assert captured["start"] == "2023-01-01"
+    assert captured["end"] == "2024-01-01"
+    assert captured["strategy_kwargs"] == {
         "weight_mom": 0.25,
         "weight_vol": 0.75,
         "weight_rev": 0.5,
@@ -504,7 +691,22 @@ def test_main_defaults_do_not_run_screening_without_universe_selection(
         "write_screening_run",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("write_screening_run should not be called for default ticker fallback")),
     )
-    monkeypatch.setattr(main, "run_with_logging", lambda *args, **kwargs: ({"final_value": 1_000_000.0, "sharpe": 0.0, "max_drawdown": 0.0}, object()))
+    monkeypatch.setattr(
+        main,
+        "run_with_logging",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("run_with_logging should not be called for default simple engine")
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "run_backtest",
+        lambda *args, **kwargs: {
+            "metrics": {"final_value": 1_000_000.0, "sharpe": 0.0, "max_drawdown": 0.0},
+            "cerebro": object(),
+        },
+        raising=False,
+    )
     monkeypatch.setattr(sys, "argv", ["main.py", "--strategy", "multi", "--no-plot"])
 
     exit_code = main.main()

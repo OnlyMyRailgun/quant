@@ -164,6 +164,43 @@ def test_approve_walk_forward_params_writes_stable_paper_trading_file(tmp_path: 
     assert loaded["weights"] == {"mom": 0.5, "vol": 1.0, "rev": 0.5}
 
 
+def test_approve_walk_forward_params_preserves_optional_value_and_quality_weights(tmp_path: Path):
+    run_dir = tmp_path / "walk_forward" / "20260320T010101Z-wf"
+    run_dir.mkdir(parents=True)
+    weights_path = run_dir / "weights.csv"
+
+    pd.DataFrame(
+        [
+            {
+                "rebalance_date": "2022-07-01",
+                "weight_mom": 0.5,
+                "weight_vol": 1.0,
+                "weight_rev": 0.0,
+                "weight_val": 0.5,
+                "weight_qual": 1.0,
+            },
+        ]
+    ).to_csv(weights_path, index=False)
+
+    approved = approve_walk_forward_params(
+        artifact_dir=tmp_path,
+        run_record={
+            "run_id": "wf-optional",
+            "weights": str(weights_path),
+        },
+        rebalance_date="2022-07-01",
+    )
+
+    assert approved["weights"] == {
+        "mom": 0.5,
+        "vol": 1.0,
+        "rev": 0.0,
+        "val": 0.5,
+        "qual": 1.0,
+    }
+    assert load_approved_paper_trading_params(tmp_path)["weights"] == approved["weights"]
+
+
 def test_approve_best_walk_forward_run_selects_from_registry_and_writes_file(tmp_path: Path):
     run_dir_a = tmp_path / "walk_forward" / "run-a"
     run_dir_b = tmp_path / "walk_forward" / "run-b"
@@ -230,6 +267,44 @@ def test_resolve_approved_weight_values_merges_explicit_overrides_with_approved_
     )
 
     assert resolved == {"mom": 1.0, "vol": 1.0, "rev": 0.5}
+
+
+def test_resolve_approved_weight_values_preserves_optional_value_and_quality(tmp_path: Path):
+    approved_path = tmp_path / "paper_trade_params.json"
+    approved_path.write_text(
+        json.dumps(
+            {
+                "source_run_id": "wf-optional",
+                "rebalance_date": "2022-07-01",
+                "weights": {
+                    "mom": 0.25,
+                    "vol": 0.5,
+                    "rev": 0.75,
+                    "val": 1.0,
+                    "qual": 1.25,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolved = resolve_approved_weight_values(
+        artifact_dir=tmp_path,
+        weight_mom=None,
+        weight_vol=None,
+        weight_rev=None,
+        weight_val=None,
+        weight_qual=None,
+        fallback=(1.0, 1.0, 1.0, 0.0, 0.0),
+    )
+
+    assert resolved == {
+        "mom": 0.25,
+        "vol": 0.5,
+        "rev": 0.75,
+        "val": 1.0,
+        "qual": 1.25,
+    }
 
 
 def test_offline_walk_forward_approval_workflow_round_trips_artifacts(tmp_path: Path):

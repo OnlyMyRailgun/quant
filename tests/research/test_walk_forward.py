@@ -231,6 +231,26 @@ def test_evaluate_weight_tuple_accepts_book_value_provider_for_simple_engine():
     assert metrics["scores"].iloc[0]["symbol"] == "BBB.T"
 
 
+def test_evaluate_weight_tuple_forwards_top_n_to_simple_engine():
+    index = pd.bdate_range("2024-01-01", "2024-07-03")
+    data_dfs = {
+        "AAA.T": pd.DataFrame({"Close": [100.0] * len(index)}, index=index),
+        "BBB.T": pd.DataFrame({"Close": [100.0] * len(index)}, index=index),
+        "CCC.T": pd.DataFrame({"Close": [100.0] * len(index)}, index=index),
+    }
+
+    metrics = optimize.evaluate_weight_tuple(
+        data_dfs=data_dfs,
+        start="2024-06-03",
+        end="2024-07-03",
+        weights=(0.0, 0.0, 0.0, 0.0),
+        engine="simple",
+        top_n=2,
+    )
+
+    assert int(metrics["scores"]["is_top_n"].sum()) == 2
+
+
 def test_evaluate_weight_tuple_uses_research_momentum_definition_in_execution(monkeypatch):
     class RankingStrategy(bt.Strategy):
         params = dict(
@@ -831,6 +851,53 @@ def test_run_walk_forward_optimization_computes_partial_universe_coverage(monkey
     assert captured["validation_metrics"]["loaded_symbol_count"] == 1
     assert captured["validation_metrics"]["skipped_symbol_count"] == 2
     assert captured["validation_metrics"]["coverage_ratio"] == 0.3333
+
+
+def test_run_walk_forward_optimization_forwards_top_n_to_all_evaluators(monkeypatch):
+    captured_kwargs = []
+
+    def fake_evaluate_weight_tuple(*args, **kwargs):
+        del args
+        captured_kwargs.append(kwargs)
+        return {"return_pct": 1.0, "sharpe": 0.1, "drawdown": 0.0}
+
+    def fake_run_walk_forward_experiment(**kwargs):
+        window = {
+            "train_start": "2021-01-01",
+            "train_end": "2021-06-30",
+            "validation_start": "2021-07-01",
+            "validation_end": "2021-12-31",
+        }
+        kwargs["evaluate_training_window"](window, (1.0, 0.0, 0.0, 0.0))
+        kwargs["evaluate_validation_window"](window, (1.0, 0.0, 0.0, 0.0))
+        kwargs["evaluate_baseline_window"](window)
+        kwargs["evaluate_one_shot_training_window"]((1.0, 0.0, 0.0, 0.0))
+        kwargs["evaluate_one_shot_validation_window"](window, (1.0, 0.0, 0.0, 0.0))
+        return {
+            "weights": pd.DataFrame(),
+            "summary": {
+                "window_count": 1,
+                "baseline_return_pct": 0.0,
+                "walk_forward_return_pct": 0.0,
+            },
+        }
+
+    monkeypatch.setattr(optimize, "evaluate_weight_tuple", fake_evaluate_weight_tuple)
+    monkeypatch.setattr(optimize, "run_walk_forward_experiment", fake_run_walk_forward_experiment)
+    book_values = lambda as_of_date: {"AAA.T": 100.0}
+
+    optimize.run_walk_forward_optimization(
+        data_dfs={"AAA.T": pd.DataFrame({"Close": [100.0]}, index=[pd.Timestamp("2021-07-01")])},
+        start="2021-01-01",
+        end="2021-12-31",
+        artifact_dir=None,
+        universe_symbols=["AAA.T"],
+        top_n=2,
+        book_values=book_values,
+    )
+
+    assert [kwargs.get("top_n") for kwargs in captured_kwargs] == [2, 2, 2, 2, 2]
+    assert [kwargs.get("book_values") for kwargs in captured_kwargs] == [book_values] * 5
 
 
 def test_run_walk_forward_optimization_smoke_test_with_offline_stubbed_evaluator(

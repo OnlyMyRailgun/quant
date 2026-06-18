@@ -1,4 +1,5 @@
 import argparse
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 import sys
@@ -21,8 +22,35 @@ from src.strategies.sma_crossover import SmaCross
 from src.strategies.momentum_factor import CrossSectionalMomentum
 from src.strategies.multi_factor import UniversalMultiFactor
 from src.engine.commission import JapanStockCommission
+from src.engine.runner import run_backtest
 from src.research.approved_params import resolve_approved_weight_values
 from src.research.screening import ScreeningRules, screen_universe
+
+
+def _strategy_param_names(strategy_class) -> set[str]:
+    params = getattr(strategy_class, "params", None)
+    if params is None:
+        return set()
+    if isinstance(params, Mapping):
+        return set(params)
+    if hasattr(params, "_getkeys"):
+        return set(params._getkeys())
+    return {
+        name
+        for name in dir(params)
+        if not name.startswith("_")
+    }
+
+
+def _filter_strategy_kwargs(strategy_class, kwargs: dict) -> dict:
+    param_names = _strategy_param_names(strategy_class)
+    if not param_names:
+        return {}
+    return {
+        key: value
+        for key, value in kwargs.items()
+        if key in param_names
+    }
 
 
 def run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_000_000.0):
@@ -31,7 +59,7 @@ def run_with_logging(data_dfs, strategy_class, kwargs_dict=None, initial_cash=1_
     if kwargs_dict is None:
         kwargs_dict = {}
         
-    cerebro.addstrategy(strategy_class, **kwargs_dict)
+    cerebro.addstrategy(strategy_class, **_filter_strategy_kwargs(strategy_class, kwargs_dict))
     
     for symbol, df in data_dfs.items():
         cerebro.adddata(bt.feeds.PandasData(dataname=df), name=symbol)
@@ -119,11 +147,16 @@ def resolve_multi_factor_weights(
         weight_rev=weight_rev,
         fallback=(1.0, 1.0, 1.0),
     )
-    return {
+    weights = {
         "weight_mom": resolved["mom"],
         "weight_vol": resolved["vol"],
         "weight_rev": resolved["rev"],
     }
+    if "val" in resolved:
+        weights["weight_val"] = resolved["val"]
+    if "qual" in resolved:
+        weights["weight_qual"] = resolved["qual"]
+    return weights
 
 
 def resolve_multi_factor_strategy_kwargs(
@@ -374,12 +407,28 @@ def main():
             sys.exit(1)
         data_dfs = {symbol: data_dfs[symbol] for symbol in eligible_symbols if symbol in data_dfs}
 
+    engine = "vectorbt" if args.fast else args.engine
     print(f"Running backtest using {selected_strategy.__name__} strategy with friction modeling...\n")
-    print("=" * 50)
-    print("ORDER & TRADE LOG")
-    print("=" * 50)
 
-    metrics, cerebro = run_with_logging(data_dfs, selected_strategy, kwargs_dict=kwargs, initial_cash=1_000_000.0)
+    if engine == "backtrader":
+        print("=" * 50)
+        print("ORDER & TRADE LOG")
+        print("=" * 50)
+        metrics, cerebro = run_with_logging(data_dfs, selected_strategy, kwargs_dict=kwargs, initial_cash=1_000_000.0)
+    else:
+        result = run_backtest(
+            data_dfs,
+            selected_strategy,
+            initial_cash=1_000_000.0,
+            engine=engine,
+            momentum_definition=args.momentum_definition,
+            reversal_filter_params=reversal_filter_params,
+            start=args.start,
+            end=args.end,
+            strategy_kwargs=kwargs,
+        )
+        metrics = result["metrics"]
+        cerebro = result["cerebro"]
 
     print("=" * 50)
     render_backtest_results(
