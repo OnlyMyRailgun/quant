@@ -58,3 +58,29 @@ def test_score_research_universe_preserves_multi_factor_score_shape():
     ]
     for col in expected_columns:
         assert col in results.columns
+
+
+def test_score_research_universe_applies_quality_factor_when_roe_values_are_supplied():
+    dates = pd.date_range("2021-01-01", periods=300)
+    flat = pd.DataFrame({"Close": [100.0] * 300}, index=dates)
+    data_dfs = {
+        "LOW_ROE.T": flat.copy(),
+        "HIGH_ROE.T": flat.copy(),
+    }
+
+    results = score_research_universe(
+        data_dfs,
+        top_n=1,
+        weight_mom=0.0,
+        weight_vol=0.0,
+        weight_rev=0.0,
+        weight_qual=1.0,
+        momentum_definition="12_1",
+        roe_values={"LOW_ROE.T": 0.05, "HIGH_ROE.T": 0.20},
+    )
+
+    assert results["symbol"].tolist() == ["HIGH_ROE.T", "LOW_ROE.T"]
+    assert "qual_z" in results.columns
+    assert "qual_contribution" in results.columns
+    assert results.loc[0, "qual_contribution"] > results.loc[1, "qual_contribution"]
+    assert bool(results.loc[0, "is_top_n"]) is True

@@ -85,7 +85,9 @@ def score_research_universe(
     raw_vol: list[float] = []
     raw_rev: list[float] = []
     raw_val: list[float] = []
+    raw_qual: list[float] = []
     use_value = book_values is not None and weight_val > 0.0
+    use_qual = roe_values is not None and weight_qual > 0.0
 
     required_history = 252 if momentum_definition == "12_1" else max(DEFAULT_LOOKBACK_MOM, lookback_vol, lookback_rev)
 
@@ -123,25 +125,42 @@ def score_research_universe(
             factors["val_raw"] = pb_raw
             raw_val.append(pb_raw)
 
+        if use_qual:
+            roe = roe_values.get(symbol)
+            if roe is not None and math.isfinite(roe):
+                factors["qual_raw"] = roe
+            else:
+                roe = math.nan
+                factors["qual_raw"] = roe
+            raw_qual.append(roe)
+
         raw_mom.append(factors["mom_raw"])
         raw_vol.append(factors["vol_raw"])
         raw_rev.append(factors["rev_raw"])
         records.append({"symbol": symbol, **factors})
 
     if not records:
-        return pd.DataFrame(
-            columns=[
-                "symbol", "price", "mom_raw", "vol_raw", "rev_raw",
-                "mom_z", "vol_z", "rev_z",
-                "mom_contribution", "vol_contribution", "rev_contribution",
-                "total_score", "rank", "is_top_n",
-            ]
-        )
+        columns = [
+            "symbol", "price", "mom_raw", "vol_raw", "rev_raw",
+            "mom_z", "vol_z", "rev_z",
+            "mom_contribution", "vol_contribution", "rev_contribution",
+            "total_score", "rank", "is_top_n",
+        ]
+        if use_value:
+            columns.insert(columns.index("rev_raw") + 1, "val_raw")
+            columns.insert(columns.index("rev_z") + 1, "val_z")
+            columns.insert(columns.index("rev_contribution") + 1, "val_contribution")
+        if use_qual:
+            columns.insert(columns.index("rev_raw") + 1, "qual_raw")
+            columns.insert(columns.index("rev_z") + 1, "qual_z")
+            columns.insert(columns.index("rev_contribution") + 1, "qual_contribution")
+        return pd.DataFrame(columns=columns)
 
     mom_z = _safe_zscores(raw_mom, invert=False)
     vol_z = _safe_zscores(raw_vol, invert=True)
     rev_z = _safe_zscores(raw_rev, invert=True)
     val_z = _safe_zscores(raw_val, invert=True) if use_value else [0.0] * len(records)
+    qual_z = _safe_zscores(raw_qual, invert=False) if use_qual else [0.0] * len(records)
 
     for i, record in enumerate(records):
         record["mom_z"] = mom_z[i]
@@ -155,6 +174,10 @@ def score_research_universe(
             record["val_z"] = val_z[i]
             record["val_contribution"] = weight_val * val_z[i]
             total += record["val_contribution"]
+        if use_qual:
+            record["qual_z"] = qual_z[i]
+            record["qual_contribution"] = weight_qual * qual_z[i]
+            total += record["qual_contribution"]
         record["total_score"] = total
 
     ranked = pd.DataFrame(records)
