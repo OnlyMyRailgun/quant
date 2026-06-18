@@ -166,15 +166,19 @@ def _compute_roe(ticker: str) -> dict[str, float]:
     if ni_key is None or eq_key is None:
         return {}
 
-    # Align quarters and compute TTM ROE
+    # Align quarters and compute TTM ROE. Columns are sorted newest first, so
+    # each current quarter uses itself plus the next three older quarters.
     common = sorted(set(income.columns) & set(bs.columns), reverse=True)
     result = {}
-    for col in common:
-        ni = income.loc[ni_key, col]
-        eq = bs.loc[eq_key, col]
-        if pd.isna(ni) or pd.isna(eq) or eq == 0:
+    for i, col in enumerate(common):
+        ttm_cols = common[i : i + 4]
+        if len(ttm_cols) < 4:
             continue
-        roe = float(ni) / float(eq)
+        ni_values = income.loc[ni_key, ttm_cols]
+        eq = bs.loc[eq_key, col]
+        if ni_values.isna().any() or pd.isna(eq) or eq == 0:
+            continue
+        roe = float(ni_values.sum()) / float(eq)
         result[col.strftime("%Y-%m-%d")] = round(roe, 6)
 
     return result

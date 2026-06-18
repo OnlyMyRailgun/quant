@@ -233,19 +233,9 @@ def generate_rebalance_orders(
     dfs = fetch_universe(symbols, start_date, end_date)
 
     # Fetch fundamental data for value and quality factors
-    import yfinance as yf
-    from src.data.fundamental_loader import get_book_values
+    from src.data.fundamental_loader import get_book_values, get_roe_values
     book_vals = get_book_values(symbols)
-    div_vals = {}
-    for sym in symbols:
-        try:
-            t = yf.Ticker(sym)
-            d = t.info.get("dividendYield")
-            if d and d > 0 and not pd.isna(d):
-                if d > 0.5: d /= 100.0
-                if d <= 0.5: div_vals[sym] = round(float(d), 6)
-        except Exception:
-            pass
+    roe_vals = get_roe_values(symbols)
 
     print("\nRunning Multi-Factor Scoring Engine on Latest Close...")
     winners = calculate_current_signals(
@@ -253,7 +243,7 @@ def generate_rebalance_orders(
         momentum_definition=momentum_definition,
         reversal_filter_params=reversal_filter_params,
         weight_val=0.5, weight_qual=1.0,
-        book_values=book_vals, roe_values=div_vals,
+        book_values=book_vals, roe_values=roe_vals,
     )
     
     print("\n🏆 TODAY'S WINNING PORTFOLIO:")

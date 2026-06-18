@@ -63,6 +63,18 @@ def test_generate_rebalance_orders_uses_default_approved_params_artifact_dir(mon
     assert captured.get("artifact_dir") == DEFAULT_ARTIFACT_DIR
 
 
+def test_generate_rebalance_orders_uses_roe_values_for_quality_factor(monkeypatch, tmp_path: Path):
+    captured = _setup_test_db_and_mocks(monkeypatch, tmp_path)
+
+    monkeypatch.setattr("src.data.fundamental_loader.get_book_values", lambda symbols: {"AAA.T": 100.0})
+    monkeypatch.setattr("src.data.fundamental_loader.get_roe_values", lambda symbols: {"AAA.T": 0.12})
+
+    bot.generate_rebalance_orders()
+
+    assert captured["book_values"] == {"AAA.T": 100.0}
+    assert captured["roe_values"] == {"AAA.T": 0.12}
+
+
 def test_monthly_guard_skips_when_already_rebalanced_this_month(monkeypatch, tmp_path: Path):
     """If a FILLED order exists from this month, generate_rebalance_orders should return early."""
     _setup_test_db_and_mocks(monkeypatch, tmp_path, with_filled_orders=True)
