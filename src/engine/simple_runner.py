@@ -152,7 +152,8 @@ def run_backtest_simple(
         eval_records = records
 
     vals = pd.Series([v for _, v in eval_records])
-    total_return = (vals.iloc[-1] / initial_cash - 1) * 100
+    return_base = vals.iloc[0] if evaluation_start or evaluation_end else initial_cash
+    total_return = (vals.iloc[-1] / return_base - 1) * 100 if return_base > 0 else 0.0
 
     monthly_returns = vals.pct_change().dropna()
     if len(monthly_returns) > 1 and monthly_returns.std() > 0:
