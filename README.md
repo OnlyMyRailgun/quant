@@ -2,11 +2,11 @@
 
 Japanese equities research and paper-trading platform. Monthly-rebalance, multi-factor, long-only.
 
-## Current State (2026-04-29)
+## Current State (2026-06-18)
 
-**Active signal**: 12_1 momentum, low volatility, P/B value, reversal filter. Monthly execution at month-start first trading day. 100-share lot minimum. 3-stock equal-weight portfolio.
+**Active research signal**: 12_1 momentum, low volatility, P/B value, quality/ROE, reversal filter. Monthly execution at month-start first trading day. 100-share lot minimum in the `simple` engine and paper-order target sizing. 3-stock equal-weight portfolio.
 
-**OOS performance** (2025-01 to 2026-03, japan_large_30, realistic execution):
+**Legacy OOS snapshot** (2025-01 to 2026-03, japan_large_30, realistic execution):
 
 | Config | Return | Sharpe | MaxDD | vs N225 |
 |--------|------:|------:|------:|------:|
@@ -14,9 +14,11 @@ Japanese equities research and paper-trading platform. Monthly-rebalance, multi-
 | + P/B=0.5 | 12.53% | 2.11 | -2.12% | -20.82% |
 | N225 (benchmark) | 33.35% | | | |
 
-**Paper trading**: Running in Docker, weekdays 15:45 JST, auto-fill at close minus slippage, daily email report. Universe: japan_large_30. Parameters: approved via walk-forward.
+These numbers predate the 2026-06-18 repair batch that fixed evaluation-window accounting and point-in-time book-value resolution. Rerun walk-forward and OOS reports before using performance figures.
 
-**Tests**: 211 passing, zero regressions.
+**Paper trading**: Running in Docker, weekdays 15:45 JST, side-aware adverse auto-fill slippage, daily email report. Universe: japan_large_30. Parameters: approved via walk-forward.
+
+**Tests**: Run `uv run pytest -q` for the current count. The suite includes regression coverage for evaluation-window returns, paper-trading lot sizing/slippage, TTM ROE, quality scoring, vectorbt slippage rejection, and point-in-time book-value providers.
 
 ## Factors
 
@@ -24,7 +26,8 @@ Japanese equities research and paper-trading platform. Monthly-rebalance, multi-
 |--------|-----------|-----------|----------|
 | 12_1 Momentum | (Close{t-21} / Close{t-251}) - 1 | Higher is better | 252 days |
 | Low Volatility | Std dev of daily returns | Lower is better | 20 days |
-| P/B Value | Close / Book-value-per-share (annual, PIT +60d) | Lower is better | N/A |
+| P/B Value | Close / Book-value-per-share (annual, as-of scoring date, estimated PIT +60d) | Lower is better | N/A |
+| Quality | TTM net income / equity | Higher is better | 4 quarters |
 | Reversal Filter | Close drawdown from 20-day high > 10% | Entry gate | 20 days |
 
 Cross-sectional Z-scores, configurable weights. Grid search: product({0.0, 0.5, 1.0}, repeat=4) = 80 combinations.
@@ -50,10 +53,10 @@ Paper trading bot (Docker, cron, auto-fill, email)
 | Engine | Execution model | Accuracy | Speed |
 |--------|----------------|----------|-------|
 | `simple` (default) | Month-start, int shares, 100-lot, equal dollar | Ground truth | Fast |
-| `vectorbt` | targetpercent, continuous | Optimistic | Fast |
+| `vectorbt` | targetpercent, continuous, no slippage | Optimistic reference | Fast |
 | `backtrader` | Event-driven, coc, order_target_percent | Reference only | Slow |
 
-`simple` is the only engine modeling realistic execution constraints. `vectorbt` and `backtrader` are kept for reference.
+`simple` is the only engine modeling realistic execution constraints. `vectorbt` rejects non-zero slippage in this target-percent path because order side is not available before portfolio construction. `vectorbt` and `backtrader` are kept for reference.
 
 ## How to Run
 
@@ -111,7 +114,9 @@ Optuna converges at 50 trials; 100 trials produces identical weights.
 - **100-share lot constraint**: Reduces returns by ~70% vs fractional-share assumption. High-price stocks may be excluded entirely (e.g., stock at ¥5,800 needs ¥580,000 minimum).
 - **Static universe**: japan_large_30 is a curated list, not point-in-time constituents. Survivorship bias present.
 - **Yahoo Finance data quality**: No independent audit of adjusted prices, suspensions, or delistings.
-- **P/B point-in-time**: Uses fiscal-year-end + 60-day delay. Publication dates are estimated, not from actual filings.
+- **P/B point-in-time**: Book values are now resolved as of each scoring date, but publication dates still use fiscal-year-end + 60-day estimates instead of actual filing timestamps.
+- **Vectorbt realism**: The vectorbt path is intentionally optimistic and does not model slippage or 100-share lots.
+- **Research acceptance**: Legacy OOS metrics must be regenerated after the 2026-06-18 accounting and PIT fixes.
 
 ## Research Findings
 
