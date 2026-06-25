@@ -37,7 +37,7 @@ def _build_html_report(
     # Build pending orders
     order_rows = ""
     if orders:
-        for oid, date, sym, action, shares, theo in orders:
+        for oid, date, sym, action, shares, theo, *_ in orders:
             color = "#16a34a" if action == "BUY" else "#dc2626"
             order_rows += f"<tr><td>#{oid}</td><td style='color:{color};font-weight:bold'>{action}</td><td>{sym}</td><td>{shares:,}</td><td>¥{theo:,.2f}</td></tr>"
     else:
