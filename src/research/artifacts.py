@@ -207,3 +207,52 @@ def write_screening_run(
         "decisions": decisions_path,
         "summary": summary_path,
     }
+
+
+def write_data_quality_run(
+    base_dir: Path,
+    metadata: dict,
+    coverage: pd.DataFrame,
+    validation_errors: pd.DataFrame,
+    summary: dict,
+    run_id: str | None = None,
+    timestamp: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, Path]:
+    run_name = "data_quality"
+    run_id = run_id or create_run_id(run_name)
+    timestamp = timestamp or _timestamp()
+    created_at = created_at or _timestamp()
+    run_dir = base_dir / run_name / f"{timestamp}-{run_id.split('-', 1)[-1]}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_path = run_dir / "metadata.json"
+    coverage_path = run_dir / "coverage.csv"
+    validation_errors_path = run_dir / "validation_errors.csv"
+    summary_path = run_dir / "summary.json"
+
+    metadata_payload = {"run_id": run_id, "run_name": run_name, **metadata}
+    metadata_path.write_text(json.dumps(metadata_payload, indent=2, sort_keys=True), encoding="utf-8")
+    coverage.to_csv(coverage_path, index=False)
+    validation_errors.to_csv(validation_errors_path, index=False)
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+    registry_entry = {
+        "run_id": run_id,
+        "run_name": run_name,
+        "run_dir": str(run_dir),
+        "metadata": str(metadata_path),
+        "coverage": str(coverage_path),
+        "validation_errors": str(validation_errors_path),
+        "summary": str(summary_path),
+        "created_at": created_at,
+    }
+    append_run_record(base_dir / "registry.jsonl", registry_entry)
+
+    return {
+        "run_dir": run_dir,
+        "metadata": metadata_path,
+        "coverage": coverage_path,
+        "validation_errors": validation_errors_path,
+        "summary": summary_path,
+    }

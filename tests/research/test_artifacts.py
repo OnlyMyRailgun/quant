@@ -217,6 +217,71 @@ def test_write_screening_run_persists_decisions_and_summary(tmp_path: Path):
     assert registry_entry["summary"] == str(paths["summary"])
 
 
+def test_write_data_quality_run_persists_required_artifacts(tmp_path: Path):
+    from src.research.artifacts import write_data_quality_run
+
+    coverage = pd.DataFrame(
+        [
+            {
+                "symbol": "AAA.T",
+                "status": "pass",
+                "manifest_status": "ok",
+                "manifest_validated_start": "2024-01-01",
+                "manifest_validated_end": "2024-01-31",
+                "raw_start": "2024-01-01",
+                "raw_end": "2024-01-31",
+                "requested_start": "2024-01-01",
+                "requested_end": "2024-01-31",
+                "row_count": 23,
+            }
+        ]
+    )
+    validation_errors = pd.DataFrame(columns=["symbol", "severity", "issue_code", "detail"])
+    summary = {
+        "requested_symbol_count": 1,
+        "passed_symbol_count": 1,
+        "failed_symbol_count": 0,
+        "critical_error_count": 0,
+        "warning_count": 0,
+        "status": "pass",
+    }
+
+    paths = write_data_quality_run(
+        base_dir=tmp_path,
+        metadata={"start": "2024-01-01", "end": "2024-01-31"},
+        coverage=coverage,
+        validation_errors=validation_errors,
+        summary=summary,
+        run_id="data_quality-20260625T010203Z-deadbeef",
+        timestamp="20260625T010203Z",
+        created_at="20260625T010203Z",
+    )
+
+    assert paths["run_dir"] == tmp_path / "data_quality" / "20260625T010203Z-20260625T010203Z-deadbeef"
+    assert paths["metadata"].exists()
+    assert paths["coverage"].exists()
+    assert paths["validation_errors"].exists()
+    assert paths["summary"].exists()
+
+    metadata = json.loads(paths["metadata"].read_text(encoding="utf-8"))
+    assert metadata["run_name"] == "data_quality"
+    assert metadata["start"] == "2024-01-01"
+
+    saved_coverage = pd.read_csv(paths["coverage"])
+    assert saved_coverage["symbol"].tolist() == ["AAA.T"]
+
+    saved_errors = pd.read_csv(paths["validation_errors"])
+    assert saved_errors.columns.tolist() == ["symbol", "severity", "issue_code", "detail"]
+
+    saved_summary = json.loads(paths["summary"].read_text(encoding="utf-8"))
+    assert saved_summary["status"] == "pass"
+
+    registry_entry = json.loads((tmp_path / "registry.jsonl").read_text(encoding="utf-8").strip())
+    assert registry_entry["run_name"] == "data_quality"
+    assert registry_entry["coverage"] == str(paths["coverage"])
+    assert registry_entry["validation_errors"] == str(paths["validation_errors"])
+
+
 def test_write_walk_forward_run_persists_diagnostics_in_summary(tmp_path: Path):
     weights = pd.DataFrame(
         [
