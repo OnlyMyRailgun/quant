@@ -619,71 +619,230 @@ git commit -m "feat: forward value-stack weights through strategy, runner, paper
 
 ---
 
-### Task 6: Thread through optimizer + full-chain integration test
+### Task 6a: Extend `score_research_universe` with the three factors (12_1 path)
+
+**Context (scope correction):** The repo has TWO scorers. `score_universe` (extended in Task 4) serves only the `90d` path. `score_research_universe` in `src/research/research_scoring.py` serves the **active 12_1 signal** and is what the optimizer, vectorbt runner, factor_analysis, and the 12_1 branch of `simple_runner` actually call. Without this task, the new factors are silently ignored on the active path. This task mirrors the Task 4 wiring into `score_research_universe`.
 
 **Files:**
-- Modify: `src/optimize.py` (`evaluate_weight_tuple` ~335, `run_walk_forward_optimization` ~515, and every closure that forwards `book_values`/`roe_values`)
+- Modify: `src/research/research_scoring.py` (`score_research_universe` at line 64)
+- Test: `tests/research/test_research_scoring.py`
+
+**Interfaces:**
+- Consumes: existing `_safe_zscores` (already imported in this module).
+- Produces: `score_research_universe(..., weight_size=0.0, weight_evebit=0.0, weight_divy=0.0, market_caps=None, ev_ebit_values=None, dividend_yields=None)` — same names/defaults/directions as `score_universe` (size inverted, evebit inverted, divy not). Adds `size_z/evebit_z/divy_z` and `*_contribution` columns when the corresponding weight>0 and input provided.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+# add to tests/research/test_research_scoring.py — match its existing make_df / import style
+from src.research.research_scoring import score_research_universe
+
+
+def _flat_300():
+    dates = pd.date_range("2021-01-01", periods=300, freq="D")
+    return pd.DataFrame({"Close": [100.0] * len(dates)}, index=dates)
+
+
+def test_research_new_factors_default_weight_zero_is_unchanged():
+    data = {"AAA.T": _flat_300(), "BBB.T": _flat_300(), "CCC.T": _flat_300()}
+    baseline = score_research_universe(
+        data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=0.0,
+        momentum_definition="12_1",
+    )
+    with_inputs = score_research_universe(
+        data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=0.0,
+        momentum_definition="12_1",
+        market_caps={"AAA.T": 1e9, "BBB.T": 2e9, "CCC.T": 3e9},
+        ev_ebit_values={"AAA.T": 5.0, "BBB.T": 10.0, "CCC.T": 15.0},
+        dividend_yields={"AAA.T": 0.01, "BBB.T": 0.02, "CCC.T": 0.03},
+    )
+    assert with_inputs["total_score"].round(10).tolist() == baseline["total_score"].round(10).tolist()
+
+
+def test_research_size_evebit_divy_directions():
+    data = {"AAA.T": _flat_300(), "BBB.T": _flat_300()}
+    sz = score_research_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_size=1.0, market_caps={"AAA.T": 1e8, "BBB.T": 9e9},
+        momentum_definition="12_1",
+    )
+    assert sz.set_index("symbol").loc["AAA.T", "size_z"] > 0
+    assert sz.iloc[0]["symbol"] == "AAA.T"
+    ev = score_research_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_evebit=1.0, ev_ebit_values={"AAA.T": 4.0, "BBB.T": 40.0},
+        momentum_definition="12_1",
+    )
+    assert ev.iloc[0]["symbol"] == "AAA.T"
+    dv = score_research_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_divy=1.0, dividend_yields={"AAA.T": 0.05, "BBB.T": 0.0},
+        momentum_definition="12_1",
+    )
+    assert dv.iloc[0]["symbol"] == "AAA.T"
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `uv run pytest tests/research/test_research_scoring.py -k "research_new_factors or research_size_evebit" -v`
+Expected: FAIL (`TypeError: unexpected keyword argument 'weight_size'`).
+
+- [ ] **Step 3: Write minimal implementation**
+
+Mirror the Task 4 changes into `score_research_universe`, following the exact pattern already used for `val`/`qual` in THIS file. Add to the signature (after `weight_qual`):
+
+```python
+    weight_size: float = 0.0,
+    weight_evebit: float = 0.0,
+    weight_divy: float = 0.0,
+    market_caps: Mapping[str, float | None] | None = None,
+    ev_ebit_values: Mapping[str, float | None] | None = None,
+    dividend_yields: Mapping[str, float | None] | None = None,
+```
+
+Add use-flags and raw lists next to `use_value`/`use_qual`:
+
+```python
+    use_size = market_caps is not None and weight_size > 0.0
+    use_evebit = ev_ebit_values is not None and weight_evebit > 0.0
+    use_divy = dividend_yields is not None and weight_divy > 0.0
+    raw_size: list[float] = []
+    raw_evebit: list[float] = []
+    raw_divy: list[float] = []
+```
+
+In the per-symbol loop, after the `use_qual` block and before `raw_mom.append(...)` (mirror the val block's None->nan handling exactly):
+
+```python
+        if use_size:
+            mc = market_caps.get(symbol)
+            sz = float(mc) if (mc is not None and mc > 0) else math.nan
+            factors["size_raw"] = sz
+            raw_size.append(sz)
+        if use_evebit:
+            ee = ev_ebit_values.get(symbol)
+            ee_v = float(ee) if (ee is not None and math.isfinite(ee)) else math.nan
+            factors["evebit_raw"] = ee_v
+            raw_evebit.append(ee_v)
+        if use_divy:
+            dy = dividend_yields.get(symbol)
+            dy_v = float(dy) if (dy is not None and math.isfinite(dy)) else math.nan
+            factors["divy_raw"] = dy_v
+            raw_divy.append(dy_v)
+```
+
+After the existing `qual_z = ...` line:
+
+```python
+    size_z = _safe_zscores(raw_size, invert=True) if use_size else [0.0] * len(records)
+    evebit_z = _safe_zscores(raw_evebit, invert=True) if use_evebit else [0.0] * len(records)
+    divy_z = _safe_zscores(raw_divy, invert=False) if use_divy else [0.0] * len(records)
+```
+
+In the `for i, record in enumerate(records):` loop, after the `use_qual` block:
+
+```python
+        if use_size:
+            record["size_z"] = size_z[i]
+            record["size_contribution"] = weight_size * size_z[i]
+            total += record["size_contribution"]
+        if use_evebit:
+            record["evebit_z"] = evebit_z[i]
+            record["evebit_contribution"] = weight_evebit * evebit_z[i]
+            total += record["evebit_contribution"]
+        if use_divy:
+            record["divy_z"] = divy_z[i]
+            record["divy_contribution"] = weight_divy * divy_z[i]
+            total += record["divy_contribution"]
+```
+
+Note: this file's `_safe_zscores` (not the industry-neutral variant) is what the existing val/qual use here — match that. Do NOT add industry-neutral handling; this scorer does not use it.
+
+- [ ] **Step 4: Run tests to verify they pass, plus research regression**
+
+Run: `uv run pytest tests/research/test_research_scoring.py -v`
+Expected: all PASS (new tests + existing regression, including the weight-0 bit-for-bit test).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/research/research_scoring.py tests/research/test_research_scoring.py
+git commit -m "feat: add size, EV/EBIT, dividend-yield factors to score_research_universe"
+```
+
+---
+
+### Task 6b: Thread new factors through optimizer + vectorbt + full-chain integration test
+
+**Context:** With both scorers extended (Task 4, Task 6a), thread the new inputs through the optimizer so the 12_1 walk-forward path can use them when supplied. The optimizer grid stays `repeat=4` — the three new factors are NOT added to the brute-force search space (that would blow it up to 2187 combos); they are forwardable inputs with default 0/None, exercised via explicit args, matching the spec's "default 0, no behavior change" principle.
+
+**Files:**
+- Modify: `src/optimize.py` (`evaluate_weight_tuple` line 335, `run_walk_forward_optimization` line 515, and the ~13 closure sites that forward `book_values`/`roe_values`); `src/engine/vectorbt_runner.py` (the `score_research_universe` call at line 139)
 - Test: `tests/research/test_walk_forward.py`
 
 **Interfaces:**
-- Consumes: the threaded call sites from Task 5 and the extended `score_universe`.
-- Produces: `evaluate_weight_tuple` and `run_walk_forward_optimization` accept + forward `market_caps`, `ev_ebit_values`, `dividend_yields` (default None) and the three weights, so walk-forward can exercise the new factors.
+- Consumes: extended `score_universe` (Task 4) and `score_research_universe` (Task 6a).
+- Produces: `evaluate_weight_tuple` and `run_walk_forward_optimization` accept + forward `market_caps`, `ev_ebit_values`, `dividend_yields` (default None) and `weight_size/weight_evebit/weight_divy` (default 0.0), forwarding into BOTH the `score_universe` (90d) and `score_research_universe` (12_1) branches.
 
-- [ ] **Step 1: Write the failing integration test (real data, no monkeypatch of score_universe)**
+- [ ] **Step 1: Write the failing integration test (real data, no scorer monkeypatch)**
+
+First inspect the real `evaluate_weight_tuple` signature (weights is a positional tuple; `w_val`/`w_qual` are derived from `weights[3]`/`weights[4]`). The test must call it the way the code expects. Use the 12_1 path so this exercises `score_research_universe`:
 
 ```python
-# add to tests/research/test_walk_forward.py
-def test_walk_forward_forwards_dividend_yields_to_scorer():
-    # Two flat-price stocks; with only divy weight active, the higher-yield
-    # stock must win — proving the input reaches score_universe through the
-    # full optimizer closure chain (the book_values-regression guard).
+# add to tests/research/test_walk_forward.py — match existing imports (pandas as pd)
+def test_walk_forward_forwards_dividend_yields_through_12_1_path():
     from src.optimize import evaluate_weight_tuple
-    dates = pd.date_range("2021-01-01", periods=300, freq="D")
-    flat = pd.DataFrame({"Close": [100.0] * len(dates)}, index=dates)
+    dates = pd.date_range("2021-01-01", periods=400, freq="D")
+    flat = pd.DataFrame(
+        {"Open": 100.0, "High": 100.0, "Low": 100.0, "Close": 100.0, "Volume": 1000},
+        index=dates,
+    )
     data = {"HIGH.T": flat.copy(), "LOW.T": flat.copy()}
     result = evaluate_weight_tuple(
-        data, w_mom=0.0, w_vol=0.0, w_rev=0.0, w_val=0.0, w_qual=0.0,
-        weight_divy=1.0, top_n=1,
+        data, start="2021-06-01", end="2022-02-01",
+        weights=(0.0, 0.0, 0.0, 0.0, 0.0),  # mom/vol/rev/val/qual all 0
+        momentum_definition="12_1", engine="simple", top_n=1,
+        weight_divy=1.0,
         dividend_yields={"HIGH.T": 0.05, "LOW.T": 0.0},
-        start="2021-01-01", end="2021-12-31",
     )
-    # The selected symbol diagnostics must include HIGH.T, not LOW.T.
+    # HIGH.T (higher yield) must be the selected pick in the diagnostics.
     assert "HIGH.T" in str(result)
 ```
 
-Adjust the exact `evaluate_weight_tuple` argument names to match its real signature when implementing; the assertion intent is: divy input reaches the scorer.
+If `evaluate_weight_tuple` cannot express "divy weight" via the `weights` tuple, add `weight_divy`/`weight_size`/`weight_evebit` as explicit keyword params in Step 3 (they are NOT part of the `weights` tuple — keep the tuple at its existing arity). Adjust date span so the 12_1 momentum's 252-day lookback is satisfied inside the window.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/research/test_walk_forward.py -k "forwards_dividend" -v`
+Run: `uv run pytest tests/research/test_walk_forward.py -k "forwards_dividend_yields_through_12_1" -v`
 Expected: FAIL (`TypeError: unexpected keyword argument 'weight_divy'`).
 
 - [ ] **Step 3: Write minimal implementation**
 
-Add `weight_size=0.0, weight_evebit=0.0, weight_divy=0.0, market_caps=None, ev_ebit_values=None, dividend_yields=None` to the signatures of `evaluate_weight_tuple` and `run_walk_forward_optimization`. Forward them into every `score_universe(...)` call and every internal closure/call that currently forwards `book_values`/`roe_values` — mirror those exact lines.
+Add `weight_size=0.0, weight_evebit=0.0, weight_divy=0.0, market_caps=None, ev_ebit_values=None, dividend_yields=None` as keyword params (NOT tuple entries) to `evaluate_weight_tuple` and `run_walk_forward_optimization`. Forward them into every `score_universe(...)` AND every `score_research_universe(...)` call, and through every closure/helper (`_call_evaluate_weight_tuple`, `_evaluate_weight_tuple_with_momentum`, and the ~13 sites forwarding `book_values`) — mirror those exact lines. Also forward into the `score_research_universe` call in `src/engine/vectorbt_runner.py:139` (defaults keep it a no-op).
 
 - [ ] **Step 4: Grep every call site and verify forwarding (AGENTS.md guard)**
 
-Run: `grep -rn "book_values" src/optimize.py`
-For EACH line that forwards `book_values`, confirm the same location now also forwards `dividend_yields` (and the other two inputs). Closures inside `run_walk_forward_optimization` MUST accept and forward the new params — a default-None omission here is the exact 2026-04-29 regression.
+Run: `grep -rn "book_values=book_values\|score_research_universe\|score_universe(" src/optimize.py src/engine/vectorbt_runner.py`
+For EACH location that forwards `book_values` OR calls either scorer, confirm it now also forwards `dividend_yields`, `market_caps`, `ev_ebit_values`, and the three weights. A closure inside `run_walk_forward_optimization` that accepts but forgets to forward is the exact 2026-04-29 regression — check each nested def and lambda.
 
 - [ ] **Step 5: Run test + full suite**
 
-Run: `uv run pytest tests/research/test_walk_forward.py -k "forwards_dividend" -v && uv run pytest -q`
+Run: `uv run pytest tests/research/test_walk_forward.py -k "forwards_dividend_yields_through_12_1" -v && uv run pytest -q`
 Expected: target test PASS; full suite all green, zero regressions.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/optimize.py tests/research/test_walk_forward.py
-git commit -m "feat: thread value-stack factors through walk-forward optimizer"
+git add src/optimize.py src/engine/vectorbt_runner.py tests/research/test_walk_forward.py
+git commit -m "feat: thread value-stack factors through optimizer and vectorbt (both scorer paths)"
 ```
 
 ---
 
 ## Self-Review Notes
 
-- **Spec coverage:** size (Task 1), EV/EBIT (Task 2), dividend yield (Task 3), scorer extension + weight-0 regression (Task 4), propagation through strategy/runner/paper (Task 5), optimizer + full-chain integration test (Task 6). All spec factors and the propagation requirement are covered.
+- **Spec coverage:** size (Task 1), EV/EBIT (Task 2), dividend yield (Task 3), `score_universe` extension + weight-0 regression (Task 4), propagation through strategy/runner/paper 90d path (Task 5), `score_research_universe` extension for the active 12_1 path + weight-0 regression (Task 6a), optimizer/vectorbt propagation + full-chain 12_1 integration test (Task 6b). All spec factors and the propagation requirement across BOTH scorer paths are covered.
+- **Scope correction (post-Task-5):** original Task 6 assumed a single scorer. The repo has two (`score_universe` for 90d, `score_research_universe` for the active 12_1 signal). Task 6 was split into 6a (extend the research scorer) and 6b (thread the optimizer/vectorbt through both paths) so the new factors are not silently ignored on the active path. The optimizer grid stays `repeat=4`; new factors are forwardable inputs, not new search dimensions.
 - **PIT:** Tasks 1-3 each test the PIT boundary or exclusion of future data. Dividend yield explicitly excludes future ex-dates.
 - **Edge cases:** negative/zero EBIT (Task 2), no-dividend zero (Task 3), NaN neutralization relies on the already-merged bug #1 fix (asserted indirectly via weight-0 regression in Task 4).
 - **AGENTS.md signature-expansion guard:** Task 6 Step 4 is the explicit grep-all-call-sites check for optimizer closures.
