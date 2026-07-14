@@ -252,7 +252,9 @@ def test_auto_fill_applies_adverse_slippage_by_order_side(monkeypatch, tmp_path:
     ]
 
 
-def test_rebalance_budget_includes_theoretical_non_target_sell_proceeds(monkeypatch, tmp_path: Path):
+def test_rebalance_buys_are_sized_from_settled_cash_only_not_sameday_sell_proceeds(monkeypatch, tmp_path: Path):
+    """T+2 settlement: same-day SELL proceeds are NOT available to fund BUYs.
+    BUY sizing must use only the settled wallet cash (Finding 6)."""
     _setup_test_db_and_mocks(monkeypatch, tmp_path)
 
     db = sqlite3.connect(bot.DB_PATH)
@@ -284,7 +286,41 @@ def test_rebalance_budget_includes_theoretical_non_target_sell_proceeds(monkeypa
 
     bot.generate_rebalance_orders()
 
+    # Wallet = 100,000. BUY budget = 100,000 * 0.95 / 1 = 95,000 -> 95,000/102 = 931
+    # -> lot-rounded to 900 shares. The 100*202 sell proceeds are NOT counted.
     assert placed_orders == [
         {"symbol": "6758.T", "action": "SELL", "shares": 100, "theoretical_price": 202.0},
-        {"symbol": "AAA.T", "action": "BUY", "shares": 1100, "theoretical_price": 102.0},
+        {"symbol": "AAA.T", "action": "BUY", "shares": 900, "theoretical_price": 102.0},
     ]
+
+
+def test_rebalance_skips_held_symbol_missing_from_fetched_data(monkeypatch, tmp_path: Path):
+    """A held symbol that is delisted / dropped from the fetched data must not
+    crash the whole rebalance with a KeyError (Finding 4)."""
+    _setup_test_db_and_mocks(monkeypatch, tmp_path)
+
+    db = sqlite3.connect(bot.DB_PATH)
+    # DEAD.T is held but will be absent from fetched data (e.g. delisted).
+    db.execute("INSERT INTO portfolio (symbol, shares, avg_price) VALUES ('DEAD.T', 100, 500.0)")
+    db.commit()
+    db.close()
+
+    def fake_fetch_universe(symbols, start_date, end_date):
+        return {"AAA.T": pd.DataFrame({"Close": [100.0, 101.0, 102.0]})}  # no DEAD.T
+
+    placed_orders = []
+
+    def fake_place_pending_order(symbol, action, shares, theoretical_price):
+        placed_orders.append({"symbol": symbol, "action": action, "shares": shares})
+        return len(placed_orders)
+
+    monkeypatch.setattr("src.data.bulk_loader.fetch_universe", fake_fetch_universe)
+    monkeypatch.setattr(bot, "place_pending_order", fake_place_pending_order)
+
+    # Must not raise KeyError; the rebalance completes and still buys AAA.T.
+    bot.generate_rebalance_orders()
+
+    symbols_ordered = {o["symbol"] for o in placed_orders}
+    assert "AAA.T" in symbols_ordered  # rebalance proceeded
+    # DEAD.T could not be priced to sell; it is skipped, not crashed on.
+    assert "DEAD.T" not in symbols_ordered

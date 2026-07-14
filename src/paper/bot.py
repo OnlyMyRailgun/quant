@@ -300,21 +300,24 @@ def generate_rebalance_orders(
     target_symbols = winners['symbol'].tolist()
 
     order_ids: list[tuple[int, str, float]] = []
-    projected_cash = wallet_cash
 
     # 1. Determine SELL orders (what we hold but shouldn't)
     for sym, shares in current_portfolio.items():
         if sym not in target_symbols:
-            price = dfs[sym]['Close'].iloc[-1]
+            sym_df = dfs.get(sym)
+            if sym_df is None or sym_df.empty:
+                # Held symbol dropped from fetched data (delisted/suspended/fetch
+                # failure). Skip rather than crash the whole rebalance on KeyError.
+                print(f"⚠️  Skipping SELL of {sym}: no price data in this run (delisted or fetch gap).")
+                continue
+            price = sym_df['Close'].iloc[-1]
             oid = place_pending_order(sym, 'SELL', shares, theoretical_price=price)
             order_ids.append((oid, 'SELL', price))
-            projected_cash += shares * price
 
-    # 2. Determine BUY orders (allocating cash equally)
-    # Note: A real system handles sell proceeds simultaneously.
-    # For MVP we simply assume we divide current + theoretical proceeds equally.
-    # To keep it safe, we just use the fixed theoretical target weight
-    target_value_per_stock = projected_cash * 0.95 / len(target_symbols)
+    # 2. Determine BUY orders (allocating cash equally).
+    # Japanese equities settle T+2, so same-day SELL proceeds are NOT available
+    # to fund today's BUYs. Size buys from settled wallet cash only.
+    target_value_per_stock = wallet_cash * 0.95 / len(target_symbols)
 
     for _, row in winners.iterrows():
         sym = row['symbol']
