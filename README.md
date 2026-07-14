@@ -149,6 +149,17 @@ Optuna converges at 50 trials; 100 trials produces identical weights.
 - **Vectorbt realism**: The vectorbt path is intentionally optimistic and does not model slippage or 100-share lots.
 - **Research acceptance**: Legacy OOS metrics must be regenerated after the 2026-06-18 accounting, no-look-ahead, parameter-flow, calendar, and default-configuration fixes.
 
+### Known Bugs — Reviewed and Deferred (2026-07-14)
+
+These were surfaced by a focused correctness review on 2026-07-14 and intentionally
+NOT fixed in that batch (the four high-severity bugs found in the same review were
+fixed). They are logged here so future reviews recognize them as already-triaged, not
+new findings.
+
+- **Treasury double-subtraction in BVPS** (`src/data/fundamental_loader.py`, `_compute_book_value_per_share`): `outstanding = "Ordinary Shares Number" - "Treasury Shares Number"`. If yfinance's "Ordinary Shares Number" is already net of treasury, this subtracts treasury twice, understating shares and overstating BVPS (distorting P/B). Deferred pending confirmation of yfinance's exact share-count semantics; do not "fix" blindly, as the wrong assumption would introduce an inverse bias.
+- **`get_earnings_yield` cannot be point-in-time** (`src/data/fundamental_loader.py`): it reads live `t.info["trailingPE"]` with no `as_of_date`, so any backtest use would be 100% look-ahead. Currently has zero call sites (dead code); the hazard is the API shape, which looks like the PIT getters but is not. Deferred; must be reworked or removed before it is ever wired into a backtest path.
+- **Empty-universe result frame omits quality columns** (`src/scoring/multi_factor.py`, empty-`records` branch): the empty DataFrame conditionally inserts `val_*` columns but never `qual_*`, so the schema differs between empty and populated universes. Low severity (schema-consistency only). Deferred.
+
 ## Legacy Research Findings
 
 These findings are useful hypotheses, not current evidence. Regenerate them after the 2026-06-18 repair batch before using them in a strategy decision.
