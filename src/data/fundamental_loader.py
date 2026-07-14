@@ -261,6 +261,88 @@ def get_roe_values(
     return result
 
 
+MARKET_CAP_CACHE = CACHE_DIR / "shares.json"
+
+
+def _compute_shares_outstanding(ticker: str) -> dict[str, float]:
+    t = yf.Ticker(ticker)
+    try:
+        bs = t.balance_sheet
+    except Exception:
+        return {}
+    if bs is None or bs.empty or "Ordinary Shares Number" not in bs.index:
+        return {}
+    result = {}
+    for col in bs.columns:
+        shares = bs.loc["Ordinary Shares Number", col]
+        treasury = 0.0
+        if "Treasury Shares Number" in bs.index:
+            ts = bs.loc["Treasury Shares Number", col]
+            if not pd.isna(ts):
+                treasury = float(ts)
+        if pd.isna(shares):
+            continue
+        outstanding = float(shares) - treasury
+        if outstanding <= 0:
+            continue
+        result[col.strftime("%Y-%m-%d")] = round(outstanding, 4)
+    return result
+
+
+def _load_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        return json.load(f)
+
+
+def _save_json(path: Path, data: dict) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _pit_pick(periods: dict[str, float], as_of_date: pd.Timestamp | None):
+    if not periods:
+        return None
+    if as_of_date is None:
+        return periods[max(periods.keys())]
+    available = {}
+    for end_str, val in periods.items():
+        pub = pd.Timestamp(end_str) + pd.DateOffset(days=PUBLICATION_DELAY_DAYS)
+        if pub <= as_of_date:
+            available[pd.Timestamp(end_str)] = val
+    if not available:
+        return None
+    return available[max(available.keys())]
+
+
+def get_market_caps(
+    symbols: list[str],
+    prices: dict[str, float],
+    as_of_date: pd.Timestamp | None = None,
+    force_refresh: bool = False,
+) -> dict[str, float | None]:
+    cache = _load_json(MARKET_CAP_CACHE) if not force_refresh else {}
+    result = {}
+    for sym in symbols:
+        if not cache.get(sym) or force_refresh:
+            try:
+                shares = _compute_shares_outstanding(sym)
+            except Exception:
+                shares = {}
+            if shares:
+                cache[sym] = shares
+        pit_shares = _pit_pick(cache.get(sym, {}), as_of_date)
+        price = prices.get(sym)
+        if pit_shares is None or price is None:
+            result[sym] = None
+        else:
+            result[sym] = round(float(price) * float(pit_shares), 4)
+    _save_json(MARKET_CAP_CACHE, cache)
+    return result
+
+
 # ── Earnings Yield (1/trailingPE) quality factor ──
 
 

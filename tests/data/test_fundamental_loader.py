@@ -9,6 +9,8 @@ from src.data.fundamental_loader import (
     _compute_book_value_per_share,
     _compute_roe,
     get_book_values,
+    get_market_caps,
+    _compute_shares_outstanding,
 )
 
 
@@ -211,3 +213,32 @@ def test_compute_roe_uses_trailing_four_quarter_net_income(monkeypatch):
     result = _compute_roe("FAKE.T")
 
     assert result == {"2024-12-31": 0.2}
+
+
+def test_compute_shares_outstanding_nets_treasury(monkeypatch):
+    fiscal_years = pd.to_datetime(["2024-03-31"])
+
+    class FakeTicker:
+        balance_sheet = pd.DataFrame(
+            [[100.0], [10.0]],
+            index=["Ordinary Shares Number", "Treasury Shares Number"],
+            columns=fiscal_years,
+        )
+
+    monkeypatch.setattr("src.data.fundamental_loader.yf.Ticker", lambda t: FakeTicker())
+    assert _compute_shares_outstanding("7203.T") == {"2024-03-31": 90.0}
+
+
+def test_get_market_caps_pit_and_price(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "src.data.fundamental_loader.MARKET_CAP_CACHE", tmp_path / "shares.json"
+    )
+    monkeypatch.setattr(
+        "src.data.fundamental_loader._compute_shares_outstanding",
+        lambda s: {"2022-03-31": 100.0, "2023-03-31": 200.0},
+    )
+    # as_of before 2023 fiscal publication -> uses 2022 shares (100) x price 5 = 500
+    result = get_market_caps(
+        ["7203.T"], prices={"7203.T": 5.0}, as_of_date=pd.Timestamp("2023-01-01")
+    )
+    assert result["7203.T"] == 500.0
