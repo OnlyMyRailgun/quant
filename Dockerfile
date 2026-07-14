@@ -24,11 +24,18 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-# Install supercronic for cron scheduling
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && curl -fsSL https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-arm64 -o /usr/local/bin/supercronic \
+# Install supercronic for cron scheduling.
+# Select the binary matching the build architecture. TARGETARCH is provided
+# automatically by BuildKit ("amd64", "arm64", ...); fall back to dpkg when a
+# plain `docker build` without BuildKit leaves it empty. The previous hardcoded
+# arm64 binary silently failed to exec on x86_64 hosts, so cron never ran.
+ARG TARGETARCH
+ARG SUPERCRONIC_VERSION=v0.2.33
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" \
+    && curl -fsSL "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${ARCH}" -o /usr/local/bin/supercronic \
     && chmod +x /usr/local/bin/supercronic \
+    && /usr/local/bin/supercronic -version \
     && apt-get remove -y curl \
     && rm -rf /var/lib/apt/lists/*
 

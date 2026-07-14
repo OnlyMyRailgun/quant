@@ -113,7 +113,7 @@ def _build_html_report(
 
   <div class="footer">
     This report was generated automatically by your Quant Engine.<br>
-    Slippage data auto-calibrated from real paper trading executions via feedback loop.
+    Slippage calibrates only from real manual fills; auto-filled orders use the current friction estimate.
   </div>
 </div>
 </body>
