@@ -92,11 +92,15 @@ def fetch_pending_orders():
         cur.execute("SELECT id, date, symbol, action, target_shares, theoretical_price FROM orders WHERE status='PENDING'")
         return cur.fetchall()
 
-def fill_order(order_id: int, actual_price: float):
+def fill_order(order_id: int, actual_price: float, is_synthetic: bool = False):
     """
-    Marks an order as executed at the manual broker price.
-    Automatically calculates slippage and updates portfolio and wallet.
-    Triggers the feedback loop down to the engine.
+    Marks an order as executed and updates portfolio and wallet.
+
+    `is_synthetic=True` marks an auto-fill whose price was generated from the
+    current friction assumption (theoretical * (1 ± seed_slippage)). Such a fill
+    carries no real market information — recalibrating the friction model from it
+    would merely re-learn its own seed, so synthetic fills DO NOT feed the loop.
+    Only real manual fills (is_synthetic=False) recalibrate friction.json.
     """
     with _connect() as conn:
         cur = conn.cursor()
@@ -164,7 +168,8 @@ def fill_order(order_id: int, actual_price: float):
     print(f"Order {order_id} FILLED. {action} {shares} {symbol} @ ¥{actual_price:.2f}.")
     print(f"Slippage Realized: {slip_pct*100:.3f}%")
 
-    _recalibrate_friction_model()
+    if not is_synthetic:
+        _recalibrate_friction_model()
 
 def _recalibrate_friction_model():
     """

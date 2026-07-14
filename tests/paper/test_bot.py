@@ -158,7 +158,7 @@ def test_email_sent_in_auto_fill_mode(monkeypatch, tmp_path: Path):
     # Both load_live_slippage and fill_order are imported locally inside
     # generate_rebalance_orders — stub their source modules
     monkeypatch.setattr("src.engine.commission.load_live_slippage", lambda: 0.0005)
-    monkeypatch.setattr("src.paper.db.fill_order", lambda oid, price: None)
+    monkeypatch.setattr("src.paper.db.fill_order", lambda oid, price, is_synthetic=False: None)
 
     bot.generate_rebalance_orders(auto_fill=True)
 
@@ -228,7 +228,9 @@ def test_auto_fill_applies_adverse_slippage_by_order_side(monkeypatch, tmp_path:
 
     fills = []
 
-    def fake_fill_order(order_id, actual_price):
+    def fake_fill_order(order_id, actual_price, is_synthetic=False):
+        # Auto-fill must mark fills synthetic so they don't recalibrate friction.
+        assert is_synthetic is True
         fills.append(
             {
                 "action": placed_by_id[order_id]["action"],

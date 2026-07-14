@@ -345,7 +345,9 @@ def generate_rebalance_orders(
         filled: list[tuple[int, str, float, float]] = []
         for oid, action, tprice in order_ids:
             actual_price = _apply_adverse_slippage(action, tprice, slippage)
-            fill_order(oid, actual_price)
+            # Synthetic fill: its price is derived from the friction seed, so it
+            # must NOT recalibrate the friction model (that loop is self-confirming).
+            fill_order(oid, actual_price, is_synthetic=True)
             filled.append((oid, action, tprice, actual_price))
 
         print(f"\n✅ Auto-filled {len(filled)} orders (slippage {slippage*100:.2f}%):")

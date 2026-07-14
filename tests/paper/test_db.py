@@ -55,6 +55,37 @@ def test_fill_sell_cannot_oversell_more_than_held(tmp_path: Path, monkeypatch):
     assert pos is None or pos[0] == 0
 
 
+def test_synthetic_autofill_does_not_recalibrate_friction(tmp_path: Path, monkeypatch):
+    """Auto-fill produces a synthetic price = theo*(1±seed); feeding its 'slippage'
+    back into friction.json would just re-learn the seed (Finding 5). Synthetic
+    fills must NOT recalibrate; the friction file stays untouched."""
+    import json
+    _setup_db(tmp_path, monkeypatch)
+    friction = tmp_path / "friction.json"
+    friction.write_text(json.dumps({"default_slippage_pct": 0.0009}))
+
+    buy = paper_db.place_pending_order("AAA.T", "BUY", 100, 1000.0)
+    # Synthetic fill at theo*(1+0.0009) — the auto-fill path.
+    paper_db.fill_order(buy, 1000.0 * 1.0009, is_synthetic=True)
+
+    # friction.json must be unchanged by a synthetic fill.
+    assert json.loads(friction.read_text())["default_slippage_pct"] == 0.0009
+
+
+def test_real_manual_fill_does_recalibrate_friction(tmp_path: Path, monkeypatch):
+    """A real manual fill (default is_synthetic=False) still drives the loop."""
+    import json
+    _setup_db(tmp_path, monkeypatch)
+    friction = tmp_path / "friction.json"
+    friction.write_text(json.dumps({"default_slippage_pct": 0.0009}))
+
+    buy = paper_db.place_pending_order("AAA.T", "BUY", 100, 1000.0)
+    # Real fill 1% above theoretical -> a genuine slippage observation.
+    paper_db.fill_order(buy, 1010.0)
+
+    assert json.loads(friction.read_text())["default_slippage_pct"] != 0.0009
+
+
 def test_fill_order_is_atomic_wallet_and_portfolio_move_together(tmp_path: Path, monkeypatch):
     """A BUY fill must update wallet AND portfolio as one unit (Finding 1)."""
     db_path = _setup_db(tmp_path, monkeypatch)
