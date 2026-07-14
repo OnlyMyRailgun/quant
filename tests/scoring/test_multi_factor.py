@@ -266,3 +266,44 @@ def test_calculate_current_signals_applies_quality_factor_with_12_1_momentum():
 
     assert winners["symbol"].tolist() == ["HIGH_ROE.T"]
     assert "qual_contribution" in winners.columns
+
+
+def test_new_value_factors_default_weight_zero_is_unchanged():
+    data = {
+        "AAA.T": make_df([100] * 70 + list(range(100, 110)) + list(range(150, 130, -1))),
+        "BBB.T": make_df([120] * 70 + list(range(120, 110, -1)) + [80] * 20),
+        "CCC.T": make_df([100] * 100),
+    }
+    baseline = score_universe(data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=1.0)
+    with_inputs = score_universe(
+        data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=1.0,
+        market_caps={"AAA.T": 1e9, "BBB.T": 2e9, "CCC.T": 3e9},
+        ev_ebit_values={"AAA.T": 5.0, "BBB.T": 10.0, "CCC.T": 15.0},
+        dividend_yields={"AAA.T": 0.01, "BBB.T": 0.02, "CCC.T": 0.03},
+    )
+    assert with_inputs["total_score"].round(10).tolist() == baseline["total_score"].round(10).tolist()
+
+
+def test_size_factor_prefers_small_cap():
+    data = {"SMALL.T": make_df([100] * 100), "BIG.T": make_df([100] * 100)}
+    result = score_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_size=1.0, market_caps={"SMALL.T": 1e8, "BIG.T": 9e9},
+    )
+    assert result.set_index("symbol").loc["SMALL.T", "size_z"] > 0
+    assert result.iloc[0]["symbol"] == "SMALL.T"
+
+
+def test_evebit_factor_prefers_cheap_and_divy_prefers_high():
+    data = {"CHEAP.T": make_df([100] * 100), "RICH.T": make_df([100] * 100)}
+    ev = score_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_evebit=1.0, ev_ebit_values={"CHEAP.T": 4.0, "RICH.T": 40.0},
+    )
+    assert ev.iloc[0]["symbol"] == "CHEAP.T"
+    dv = score_universe(
+        {"HIGH.T": make_df([100] * 100), "LOW.T": make_df([100] * 100)},
+        top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_divy=1.0, dividend_yields={"HIGH.T": 0.05, "LOW.T": 0.0},
+    )
+    assert dv.iloc[0]["symbol"] == "HIGH.T"
