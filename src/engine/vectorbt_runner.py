@@ -39,6 +39,12 @@ def run_backtest_vectorbt(
     reversal_filter_params=None,
     evaluation_start: str | None = None,
     evaluation_end: str | None = None,
+    weight_size: float = 0.0,
+    weight_evebit: float = 0.0,
+    weight_divy: float = 0.0,
+    market_caps: dict[str, float | None] | None = None,
+    ev_ebit_values: dict[str, float | None] | None = None,
+    dividend_yields: dict[str, float | None] | None = None,
 ) -> dict:
     """Orchestrate per-date scoring, order building, and vectorbt portfolio simulation.
 
@@ -143,6 +149,12 @@ def run_backtest_vectorbt(
                 weight_vol=weight_vol,
                 weight_rev=weight_rev,
                 momentum_definition="12_1",
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
         else:
             scored = score_universe(
@@ -151,6 +163,12 @@ def run_backtest_vectorbt(
                 weight_mom=weight_mom,
                 weight_vol=weight_vol,
                 weight_rev=weight_rev,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
 
         if scored.empty:

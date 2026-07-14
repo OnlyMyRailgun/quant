@@ -299,6 +299,12 @@ def _evaluate_weight_tuple_with_momentum(
     book_values: BookValuesInput = None,
     roe_values: dict[str, float | None] | None = None,
     top_n: int = DEFAULT_TOP_N,
+    weight_size: float = 0.0,
+    weight_evebit: float = 0.0,
+    weight_divy: float = 0.0,
+    market_caps: dict[str, float | None] | None = None,
+    ev_ebit_values: dict[str, float | None] | None = None,
+    dividend_yields: dict[str, float | None] | None = None,
 ) -> dict[str, object]:
     return _call_evaluate_weight_tuple(
         data_dfs,
@@ -311,6 +317,12 @@ def _evaluate_weight_tuple_with_momentum(
         book_values=book_values,
         roe_values=roe_values,
         top_n=top_n,
+        weight_size=weight_size,
+        weight_evebit=weight_evebit,
+        weight_divy=weight_divy,
+        market_caps=market_caps,
+        ev_ebit_values=ev_ebit_values,
+        dividend_yields=dividend_yields,
     )
 
 
@@ -327,6 +339,12 @@ def _build_execution_strategy_class(momentum_definition: str):
                 weight_vol=self.p.weight_vol,
                 weight_rev=self.p.weight_rev,
                 momentum_definition=momentum_definition,
+                weight_size=getattr(self.p, "weight_size", 0.0),
+                weight_evebit=getattr(self.p, "weight_evebit", 0.0),
+                weight_divy=getattr(self.p, "weight_divy", 0.0),
+                market_caps=getattr(self.p, "market_caps", None),
+                ev_ebit_values=getattr(self.p, "ev_ebit_values", None),
+                dividend_yields=getattr(self.p, "dividend_yields", None),
             )
 
     return ResearchExecutionStrategy
@@ -345,6 +363,12 @@ def evaluate_weight_tuple(
     book_values: BookValuesInput = None,
     roe_values: dict[str, float | None] | None = None,
     top_n: int = DEFAULT_TOP_N,
+    weight_size: float = 0.0,
+    weight_evebit: float = 0.0,
+    weight_divy: float = 0.0,
+    market_caps: dict[str, float | None] | None = None,
+    ev_ebit_values: dict[str, float | None] | None = None,
+    dividend_yields: dict[str, float | None] | None = None,
 ) -> dict[str, float]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -365,6 +389,12 @@ def evaluate_weight_tuple(
             weight_rev=weights[2],
             weight_val=w_val, weight_qual=w_qual, roe_values=roe_values,
             top_n=top_n,
+            weight_size=weight_size,
+            weight_evebit=weight_evebit,
+            weight_divy=weight_divy,
+            market_caps=market_caps,
+            ev_ebit_values=ev_ebit_values,
+            dividend_yields=dividend_yields,
         )
         return {
             "return_pct": 0.0,
@@ -383,6 +413,12 @@ def evaluate_weight_tuple(
             weight_val=w_val, weight_qual=w_qual, roe_values=roe_values,
             momentum_definition=momentum_definition,
             book_values=score_book_values,
+            weight_size=weight_size,
+            weight_evebit=weight_evebit,
+            weight_divy=weight_divy,
+            market_caps=market_caps,
+            ev_ebit_values=ev_ebit_values,
+            dividend_yields=dividend_yields,
         )
     else:
         scores = score_universe(
@@ -393,6 +429,12 @@ def evaluate_weight_tuple(
             weight_rev=weights[2],
             weight_val=w_val, weight_qual=w_qual, roe_values=roe_values,
             book_values=score_book_values,
+            weight_size=weight_size,
+            weight_evebit=weight_evebit,
+            weight_divy=weight_divy,
+            market_caps=market_caps,
+            ev_ebit_values=ev_ebit_values,
+            dividend_yields=dividend_yields,
         )
 
     if reversal_filter_params is not None:
@@ -409,6 +451,12 @@ def evaluate_weight_tuple(
             reversal_filter_params=reversal_filter_params,
             evaluation_start=eval_start, evaluation_end=eval_end,
             book_values=book_values, roe_values=roe_values,
+            weight_size=weight_size,
+            weight_evebit=weight_evebit,
+            weight_divy=weight_divy,
+            market_caps=market_caps,
+            ev_ebit_values=ev_ebit_values,
+            dividend_yields=dividend_yields,
         )
 
     if engine == "vectorbt":
@@ -426,6 +474,12 @@ def evaluate_weight_tuple(
             reversal_filter_params=reversal_filter_params,
             evaluation_start=eval_start,
             evaluation_end=eval_end,
+            weight_size=weight_size,
+            weight_evebit=weight_evebit,
+            weight_divy=weight_divy,
+            market_caps=market_caps,
+            ev_ebit_values=ev_ebit_values,
+            dividend_yields=dividend_yields,
         )
 
     strategy_class = _build_execution_strategy_class(momentum_definition)
@@ -534,6 +588,12 @@ def run_walk_forward_optimization(
     n_factors: int = 4,
     top_n: int = DEFAULT_TOP_N,
     roe_values: dict[str, float | None] | None = None,
+    weight_size: float = 0.0,
+    weight_evebit: float = 0.0,
+    weight_divy: float = 0.0,
+    market_caps: dict[str, float | None] | None = None,
+    ev_ebit_values: dict[str, float | None] | None = None,
+    dividend_yields: dict[str, float | None] | None = None,
 ) -> dict[str, object]:
     if momentum_definition not in SUPPORTED_MOMENTUM_DEFINITIONS:
         raise ValueError(f"Unsupported momentum_definition: {momentum_definition}")
@@ -623,6 +683,12 @@ def run_walk_forward_optimization(
                 book_values=book_values,
                 roe_values=roe_values,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
 
         def evaluate_validation_window(window, weights):
@@ -644,6 +710,12 @@ def run_walk_forward_optimization(
                 book_values=book_values,
                 roe_values=roe_values,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
             metrics = metrics | _build_validation_participation_metrics(
                 data_dfs=window_dfs,
@@ -672,6 +744,12 @@ def run_walk_forward_optimization(
                 book_values=book_values,
                 roe_values=roe_values,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
 
         def evaluate_one_shot_training_window(weights):
@@ -689,6 +767,12 @@ def run_walk_forward_optimization(
                 book_values=book_values,
                 roe_values=roe_values,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
 
         def evaluate_one_shot_validation_window(window, weights):
@@ -710,6 +794,12 @@ def run_walk_forward_optimization(
                 book_values=book_values,
                 roe_values=roe_values,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
 
     else:
@@ -725,6 +815,12 @@ def run_walk_forward_optimization(
                 roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
 
         def evaluate_validation_window(window, weights):
@@ -739,6 +835,12 @@ def run_walk_forward_optimization(
                 roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             ) | _build_validation_participation_metrics(
                 data_dfs=data_dfs,
                 universe_symbols=universe_symbols,
@@ -758,6 +860,12 @@ def run_walk_forward_optimization(
                 roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
 
         def evaluate_one_shot_training_window(weights):
@@ -772,6 +880,12 @@ def run_walk_forward_optimization(
                 roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
 
         def evaluate_one_shot_validation_window(window, weights):
@@ -786,6 +900,12 @@ def run_walk_forward_optimization(
                 roe_values=roe_values,
                 engine=engine,
                 top_n=top_n,
+                weight_size=weight_size,
+                weight_evebit=weight_evebit,
+                weight_divy=weight_divy,
+                market_caps=market_caps,
+                ev_ebit_values=ev_ebit_values,
+                dividend_yields=dividend_yields,
             )
 
     result = run_walk_forward_experiment(

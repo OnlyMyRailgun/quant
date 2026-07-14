@@ -1838,3 +1838,31 @@ def test_run_walk_forward_optimization_persists_momentum_definition_metadata(mon
     assert result["metadata"]["momentum_definition"] == "12_1"
     metadata = json.loads(result["artifacts"]["metadata"].read_text(encoding="utf-8"))
     assert metadata["momentum_definition"] == "12_1"
+
+
+def test_walk_forward_forwards_dividend_yields_through_12_1_path():
+    from src.optimize import evaluate_weight_tuple
+
+    # 400 calendar days gives ~280 business days — well above 252-bar 12_1 lookback.
+    dates = pd.date_range("2021-01-01", periods=400, freq="D")
+    flat = pd.DataFrame(
+        {"Open": 100.0, "High": 100.0, "Low": 100.0, "Close": 100.0, "Volume": 1000},
+        index=dates,
+    )
+    data = {"HIGH.T": flat.copy(), "LOW.T": flat.copy()}
+
+    result = evaluate_weight_tuple(
+        data,
+        start="2021-06-01",
+        end="2022-02-01",
+        weights=(0.0, 0.0, 0.0, 0.0, 0.0),  # mom/vol/rev/val/qual all 0
+        momentum_definition="12_1",
+        engine="simple",
+        top_n=1,
+        weight_divy=1.0,
+        dividend_yields={"HIGH.T": 0.05, "LOW.T": 0.0},
+    )
+
+    # HIGH.T (higher yield) must be selected — confirms weight_divy + dividend_yields
+    # reached score_research_universe via the 12_1 path.
+    assert "HIGH.T" in str(result)
