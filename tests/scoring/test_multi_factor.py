@@ -122,6 +122,58 @@ def test_score_universe_returns_empty_when_all_symbols_are_invalid():
     assert result.empty
 
 
+def test_missing_optional_value_factor_is_neutral_not_nan_poisoning():
+    """A stock missing its P/B input must be scored neutrally (val_z=0) on that
+    factor, not dropped from top_n via a NaN total_score."""
+    strong_mom = make_df([100] * 70 + list(range(100, 130)))
+    mid_mom = make_df([110] * 70 + list(range(110, 125)) + list(range(125, 110, -1)))
+    weak_mom = make_df([130] * 70 + list(range(130, 100, -1)))
+    # STRONG has the best momentum but a missing book value. MID/WEAK have valid
+    # book values, so the val z-score population has std > 0 (not the zero-std
+    # fallback), meaning STRONG's own val_z is a genuine NaN unless we neutralize.
+    data = {"STRONG.T": strong_mom, "MID.T": mid_mom, "WEAK.T": weak_mom}
+
+    result = score_universe(
+        data,
+        top_n=1,
+        weight_mom=1.0,
+        weight_vol=0.0,
+        weight_rev=0.0,
+        weight_val=0.5,
+        book_values={"STRONG.T": None, "MID.T": 2.0, "WEAK.T": 5.0},
+    )
+
+    by_symbol = result.set_index("symbol")
+    # STRONG.T is missing book value; it must not be NaN-poisoned out of top_n.
+    assert by_symbol.loc["STRONG.T", "total_score"] == by_symbol.loc["STRONG.T", "total_score"]  # not NaN
+    assert by_symbol.loc["STRONG.T", "val_z"] == 0.0
+    assert by_symbol.loc["STRONG.T", "is_top_n"]
+
+
+def test_industry_neutral_single_stock_industry_uses_cross_sectional_zscore():
+    """Single-stock industries must fall back to the cross-sectional z-score
+    (as the docstring promises), not be zeroed out."""
+    strong_mom = make_df([100] * 70 + list(range(100, 130)))
+    weak_mom = make_df([130] * 70 + list(range(130, 100, -1)))
+    data = {"STRONG.T": strong_mom, "WEAK.T": weak_mom}
+
+    result = score_universe(
+        data,
+        top_n=1,
+        weight_mom=1.0,
+        weight_vol=0.0,
+        weight_rev=0.0,
+        industry_map={"STRONG.T": "SectorA", "WEAK.T": "SectorB"},
+    )
+
+    by_symbol = result.set_index("symbol")
+    # Each stock is alone in its industry; both would be zeroed by the bug,
+    # collapsing the ranking. Correct behavior gives non-zero cross-sectional z.
+    assert by_symbol.loc["STRONG.T", "mom_z"] != 0.0
+    assert by_symbol.loc["STRONG.T", "mom_z"] > by_symbol.loc["WEAK.T", "mom_z"]
+    assert by_symbol.loc["STRONG.T", "is_top_n"]
+
+
 # Task 3 paper-trading integration coverage lives here so the pure scorer
 # expectations above stay focused on the shared scoring module itself.
 def test_paper_signal_generation_matches_shared_scoring():

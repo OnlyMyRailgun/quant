@@ -39,7 +39,13 @@ def _safe_zscores(values: list[float], invert: bool = False) -> list[float]:
 
     mean = series.mean()
     multiplier = -1.0 if invert else 1.0
-    return [multiplier * ((value - mean) / std) for value in values]
+    # A NaN raw value (e.g. a missing optional fundamental) is neutralized to
+    # 0.0 rather than propagating NaN into the stock's total_score, which would
+    # otherwise sink it to the bottom of the ranking on an unrelated factor.
+    return [
+        multiplier * ((value - mean) / std) if math.isfinite(value) else 0.0
+        for value in values
+    ]
 
 
 def _industry_neutral_zscores(
@@ -56,7 +62,10 @@ def _industry_neutral_zscores(
         return [0.0] * len(values)
 
     df = pd.DataFrame({"raw": values, "industry": industries})
-    result = [0.0] * len(values)
+    # Cross-sectional z-scores used as fallback when an industry group cannot
+    # produce its own z-score (single-stock group, or zero/NaN within-group std).
+    cross_sectional = _safe_zscores(values, invert=invert)
+    result = list(cross_sectional)
     multiplier = -1.0 if invert else 1.0
 
     for industry, group in df.groupby("industry"):
@@ -68,11 +77,17 @@ def _industry_neutral_zscores(
             if std > 0 and not pd.isna(std):
                 mean = series.mean()
                 for j, i in enumerate(idx):
-                    result[i] = multiplier * ((group_vals[j] - mean) / std)
+                    val = group_vals[j]
+                    result[i] = (
+                        multiplier * ((val - mean) / std)
+                        if math.isfinite(val)
+                        else 0.0
+                    )
                 continue
-        # Fallback: single-stock industry → use cross-sectional z-score
-        for j, i in enumerate(idx):
-            result[i] = 0.0  # neutral for single-stock groups
+        # Fallback: single-stock or degenerate-std industry → cross-sectional
+        # z-score, matching this function's documented contract.
+        for i in idx:
+            result[i] = cross_sectional[i]
 
     return result
 

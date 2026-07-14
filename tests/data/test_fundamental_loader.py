@@ -12,6 +12,81 @@ from src.data.fundamental_loader import (
 )
 
 
+def test_empty_result_is_not_cached_so_transient_failure_can_recover(
+    tmp_path: Path, monkeypatch
+):
+    """A transient fetch failure returning {} must not be persisted as a
+    permanent empty cache entry; a later successful fetch must be attempted."""
+    monkeypatch.setattr(
+        "src.data.fundamental_loader.FUNDAMENTAL_CACHE",
+        tmp_path / "fundamentals.json",
+    )
+
+    calls = {"n": 0}
+
+    def flaky_compute(symbol):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {}  # transient failure
+        return {"2024-03-31": 1000.0}
+
+    monkeypatch.setattr(
+        "src.data.fundamental_loader._compute_book_value_per_share",
+        flaky_compute,
+    )
+
+    first = get_book_values(["7203.T"], as_of_date=None)
+    assert first["7203.T"] is None
+
+    # Empty result must NOT have been persisted as a permanent entry.
+    if (tmp_path / "fundamentals.json").exists():
+        with open(tmp_path / "fundamentals.json") as f:
+            cached = json.load(f)
+        assert cached.get("7203.T") in (None, {}) and "7203.T" not in {
+            k: v for k, v in cached.items() if v
+        }
+
+    # Second call (no force_refresh) must retry the fetch and now succeed.
+    second = get_book_values(["7203.T"], as_of_date=None)
+    assert second["7203.T"] == 1000.0
+
+
+def test_compute_roe_rejects_ttm_window_that_spans_more_than_a_year(monkeypatch):
+    """When income and balance-sheet quarters don't align, the 4-element
+    intersection window can cover >4 calendar quarters; such a window must not
+    be treated as a valid TTM figure."""
+    # Income has a gap (missing 2024-06-30); balance sheet is complete.
+    income_quarters = pd.to_datetime(
+        ["2024-12-31", "2024-09-30", "2024-03-31", "2023-12-31"]
+    )
+    bs_quarters = pd.to_datetime(
+        ["2024-12-31", "2024-09-30", "2024-06-30", "2024-03-31", "2023-12-31"]
+    )
+
+    class FakeTicker:
+        quarterly_financials = pd.DataFrame(
+            [[10.0, 20.0, 30.0, 40.0]],
+            index=["Net Income"],
+            columns=income_quarters,
+        )
+        quarterly_balance_sheet = pd.DataFrame(
+            [[500.0, 400.0, 350.0, 300.0, 200.0]],
+            index=["Stockholders Equity"],
+            columns=bs_quarters,
+        )
+
+    monkeypatch.setattr(
+        "src.data.fundamental_loader.yf.Ticker", lambda ticker: FakeTicker()
+    )
+
+    result = _compute_roe("FAKE.T")
+
+    # The newest window [2024-12-31, 2024-09-30, 2024-03-31, 2023-12-31] spans
+    # a full year of gaps (missing Q ending 2024-06-30). It must NOT be emitted
+    # as a valid TTM ROE, because the summed income is not a true trailing-12m.
+    assert "2024-12-31" not in result
+
+
 def test_compute_book_value_per_share_returns_dict(monkeypatch):
     """BVPS is computed from equity divided by shares net of treasury stock."""
     fiscal_years = pd.to_datetime(["2024-03-31", "2023-03-31"])
