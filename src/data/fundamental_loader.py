@@ -96,12 +96,15 @@ def get_book_values(
 
     result = {}
     for sym in symbols:
-        if sym not in cache or force_refresh:
+        # An empty cache entry means a prior fetch failed to return data; retry
+        # rather than treating the transient failure as a permanent result.
+        if not cache.get(sym) or force_refresh:
             try:
                 bvps = _compute_book_value_per_share(sym)
-                cache[sym] = bvps
             except Exception:
-                cache[sym] = {}
+                bvps = {}
+            if bvps:
+                cache[sym] = bvps
 
         fiscal_years = cache.get(sym, {})
         if not fiscal_years:
@@ -174,6 +177,12 @@ def _compute_roe(ticker: str) -> dict[str, float]:
         ttm_cols = common[i : i + 4]
         if len(ttm_cols) < 4:
             continue
+        # Guard against misaligned statements: the intersection can leave gaps
+        # so that 4 consecutive columns span more than a year. Such a window is
+        # not a true trailing-twelve-month figure, so skip it.
+        span_days = (pd.Timestamp(ttm_cols[0]) - pd.Timestamp(ttm_cols[-1])).days
+        if span_days > 320:
+            continue
         ni_values = income.loc[ni_key, ttm_cols]
         eq = bs.loc[eq_key, col]
         if ni_values.isna().any() or pd.isna(eq) or eq == 0:
@@ -216,12 +225,15 @@ def get_roe_values(
 
     result = {}
     for sym in symbols:
-        if sym not in cache or force_refresh:
+        # An empty cache entry means a prior fetch failed to return data; retry
+        # rather than treating the transient failure as a permanent result.
+        if not cache.get(sym) or force_refresh:
             try:
                 roe_data = _compute_roe(sym)
-                cache[sym] = roe_data
             except Exception:
-                cache[sym] = {}
+                roe_data = {}
+            if roe_data:
+                cache[sym] = roe_data
 
         roe_by_quarter = cache.get(sym, {})
         if not roe_by_quarter:
