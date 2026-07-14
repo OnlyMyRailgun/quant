@@ -75,12 +75,18 @@ def _build_signal_run(
     weight_rev=DEFAULT_SIGNAL_WEIGHT_REV,
     weight_val=0.0,
     weight_qual=0.0,
+    weight_size=0.0,
+    weight_evebit=0.0,
+    weight_divy=0.0,
     lookback_mom=DEFAULT_LOOKBACK_MOM,
     lookback_vol=DEFAULT_LOOKBACK_VOL,
     lookback_rev=DEFAULT_LOOKBACK_REV,
     momentum_definition="90d",
     book_values=None,
     roe_values=None,
+    market_caps=None,
+    ev_ebit_values=None,
+    dividend_yields=None,
 ):
     if momentum_definition != "90d":
         from src.research.research_scoring import score_research_universe
@@ -105,11 +111,17 @@ def _build_signal_run(
         weight_rev=weight_rev,
         weight_val=weight_val,
         weight_qual=weight_qual,
+        weight_size=weight_size,
+        weight_evebit=weight_evebit,
+        weight_divy=weight_divy,
         lookback_mom=lookback_mom,
         lookback_vol=lookback_vol,
         lookback_rev=lookback_rev,
         book_values=book_values,
         roe_values=roe_values,
+        market_caps=market_caps,
+        ev_ebit_values=ev_ebit_values,
+        dividend_yields=dividend_yields,
     )
     return ranked
 
@@ -130,6 +142,9 @@ def calculate_current_signals(
     weight_rev: float | None = None,
     weight_val: float = 0.0,
     weight_qual: float = 0.0,
+    weight_size: float = 0.0,
+    weight_evebit: float = 0.0,
+    weight_divy: float = 0.0,
     lookback_mom=DEFAULT_LOOKBACK_MOM,
     lookback_vol=DEFAULT_LOOKBACK_VOL,
     lookback_rev=DEFAULT_LOOKBACK_REV,
@@ -138,6 +153,9 @@ def calculate_current_signals(
     momentum_definition="90d",
     book_values=None,
     roe_values=None,
+    market_caps=None,
+    ev_ebit_values=None,
+    dividend_yields=None,
 ):
     """
     Shared paper-trading scorer for generating today's live signals.
@@ -168,12 +186,18 @@ def calculate_current_signals(
         weight_rev=resolved_weight_rev,
         weight_val=resolved_weight_val,
         weight_qual=resolved_weight_qual,
+        weight_size=weight_size,
+        weight_evebit=weight_evebit,
+        weight_divy=weight_divy,
         lookback_mom=lookback_mom,
         lookback_vol=lookback_vol,
         lookback_rev=lookback_rev,
         momentum_definition=momentum_definition,
         book_values=book_values,
         roe_values=roe_values,
+        market_caps=market_caps,
+        ev_ebit_values=ev_ebit_values,
+        dividend_yields=dividend_yields,
     )
 
     if reversal_filter_params is not None:

@@ -82,6 +82,12 @@ def run_backtest_simple(
     book_values: BookValuesInput = None,
     roe_values: dict[str, float | None] | None = None,
     industry_map: dict[str, str] | None = None,
+    weight_size: float = 0.0,
+    weight_evebit: float = 0.0,
+    weight_divy: float = 0.0,
+    market_caps: dict[str, float | None] | None = None,
+    ev_ebit_values: dict[str, float | None] | None = None,
+    dividend_yields: dict[str, float | None] | None = None,
 ) -> dict:
     w_mom, w_vol, w_rev = weights[:3]
     w_val = weights[3] if len(weights) > 3 else 0.0
@@ -146,6 +152,8 @@ def run_backtest_simple(
                             window_dfs, top_n=top_n,
                             weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
                             weight_val=w_val, weight_qual=w_qual, book_values=effective_book_values, roe_values=roe_values,
+                            weight_size=weight_size, weight_evebit=weight_evebit, weight_divy=weight_divy,
+                            market_caps=market_caps, ev_ebit_values=ev_ebit_values, dividend_yields=dividend_yields,
                             industry_map=industry_map,
                         )
                 except ValueError:

@@ -307,3 +307,12 @@ def test_evebit_factor_prefers_cheap_and_divy_prefers_high():
         weight_divy=1.0, dividend_yields={"HIGH.T": 0.05, "LOW.T": 0.0},
     )
     assert dv.iloc[0]["symbol"] == "HIGH.T"
+
+
+def test_paper_signals_forward_size_factor():
+    data = {"SMALL.T": make_df([100] * 100), "BIG.T": make_df([100] * 100)}
+    winners = calculate_current_signals(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_size=1.0, market_caps={"SMALL.T": 1e8, "BIG.T": 9e9},
+    )
+    assert winners.iloc[0]["symbol"] == "SMALL.T"
