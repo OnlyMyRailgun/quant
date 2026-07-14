@@ -101,6 +101,12 @@ def _build_signal_run(
             momentum_definition=momentum_definition,
             book_values=book_values,
             roe_values=roe_values,
+            weight_size=weight_size,
+            weight_evebit=weight_evebit,
+            weight_divy=weight_divy,
+            market_caps=market_caps,
+            ev_ebit_values=ev_ebit_values,
+            dividend_yields=dividend_yields,
         )
         return ranked
     ranked = score_universe(

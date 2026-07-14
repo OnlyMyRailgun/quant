@@ -146,6 +146,8 @@ def run_backtest_simple(
                             weight_mom=w_mom, weight_vol=w_vol, weight_rev=w_rev,
                             weight_val=w_val, weight_qual=w_qual, book_values=effective_book_values, roe_values=roe_values,
                             momentum_definition=momentum_definition,
+                            weight_size=weight_size, weight_evebit=weight_evebit, weight_divy=weight_divy,
+                            market_caps=market_caps, ev_ebit_values=ev_ebit_values, dividend_yields=dividend_yields,
                         )
                     else:
                         scored = score_universe(

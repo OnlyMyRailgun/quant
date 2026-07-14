@@ -1841,6 +1841,16 @@ def test_run_walk_forward_optimization_persists_momentum_definition_metadata(mon
 
 
 def test_walk_forward_forwards_dividend_yields_through_12_1_path():
+    """Regression: simple-engine 12_1 path must forward weight_divy+dividend_yields.
+
+    LOW.T is listed first in the data dict so that with all-zero weights (bug:
+    divy dropped) the stable mergesort picks LOW.T rank=1 — HIGH.T would NOT
+    be bought. With weight_divy=1.0 forwarded (fix), HIGH.T's yield=0.05 >
+    LOW.T's 0.0 gives HIGH.T a higher score, so HIGH.T is bought instead.
+
+    The test inspects symbol_returns: HIGH.T must appear and LOW.T must not,
+    proving the factor is live on the 12_1 simple path.
+    """
     from src.optimize import evaluate_weight_tuple
 
     # 400 calendar days gives ~280 business days — well above 252-bar 12_1 lookback.
@@ -1849,7 +1859,8 @@ def test_walk_forward_forwards_dividend_yields_through_12_1_path():
         {"Open": 100.0, "High": 100.0, "Low": 100.0, "Close": 100.0, "Volume": 1000},
         index=dates,
     )
-    data = {"HIGH.T": flat.copy(), "LOW.T": flat.copy()}
+    # LOW.T first in dict: with all-zero weights (bug) stable sort picks LOW.T rank=1.
+    data = {"LOW.T": flat.copy(), "HIGH.T": flat.copy()}
 
     result = evaluate_weight_tuple(
         data,
@@ -1863,9 +1874,18 @@ def test_walk_forward_forwards_dividend_yields_through_12_1_path():
         dividend_yields={"HIGH.T": 0.05, "LOW.T": 0.0},
     )
 
-    # HIGH.T (higher yield) must be selected — confirms weight_divy + dividend_yields
-    # reached score_research_universe via the 12_1 path.
-    assert "HIGH.T" in str(result)
+    traded_symbols = {row["symbol"] for row in result["symbol_returns"]}
+    # HIGH.T must be traded (bought) and LOW.T must not — only divy distinguishes them.
+    assert "HIGH.T" in traded_symbols, (
+        f"Expected HIGH.T to be selected (weight_divy=1.0, yield=0.05), "
+        f"got symbol_returns={result['symbol_returns']!r}. "
+        f"Likely cause: weight_divy/dividend_yields not forwarded to score_research_universe "
+        f"on the 12_1 simple path."
+    )
+    assert "LOW.T" not in traded_symbols, (
+        f"LOW.T should not be held when HIGH.T has a higher dividend yield, "
+        f"got symbol_returns={result['symbol_returns']!r}."
+    )
 
 
 def test_walk_forward_forwards_dividend_yields_through_backtrader_path():

@@ -316,3 +316,34 @@ def test_paper_signals_forward_size_factor():
         weight_size=1.0, market_caps={"SMALL.T": 1e8, "BIG.T": 9e9},
     )
     assert winners.iloc[0]["symbol"] == "SMALL.T"
+
+
+def test_paper_signals_forward_size_factor_12_1():
+    """Regression: paper bot 12_1 path must forward weight_size/market_caps.
+
+    BIG.T is listed first in the data dict so that with all-zero weights (bug:
+    size dropped) the stable sort picks BIG.T rank=1 — SMALL.T would NOT be
+    selected. With weight_size=1.0 forwarded (fix), SMALL.T's small market cap
+    gives it a higher size_z, so SMALL.T wins instead.
+
+    Needs >=252 bars for the 12_1 lookback.
+    """
+    # 300 daily rows is enough for the 252-bar 12_1 lookback.
+    dates = pd.date_range("2021-01-01", periods=300, freq="D")
+    flat = pd.DataFrame({"Close": [100.0] * len(dates)}, index=dates)
+    # BIG.T first: with all-zero weights (bug) stable sort picks BIG.T rank=1.
+    data = {"BIG.T": flat.copy(), "SMALL.T": flat.copy()}
+
+    winners = calculate_current_signals(
+        data, top_n=1,
+        weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_size=1.0, market_caps={"SMALL.T": 1e8, "BIG.T": 9e9},
+        momentum_definition="12_1",
+    )
+
+    assert winners.iloc[0]["symbol"] == "SMALL.T", (
+        f"Expected SMALL.T to be selected (weight_size=1.0, small market cap), "
+        f"got {winners['symbol'].tolist()!r}. "
+        f"Likely cause: weight_size/market_caps not forwarded to score_research_universe "
+        f"on the 12_1 paper bot path."
+    )
