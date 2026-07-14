@@ -490,6 +490,12 @@ def evaluate_weight_tuple(
         "weight_vol": weights[1],
         "weight_rev": weights[2],
         "top_n": top_n,
+        "weight_size": weight_size,
+        "weight_evebit": weight_evebit,
+        "weight_divy": weight_divy,
+        "market_caps": market_caps,
+        "ev_ebit_values": ev_ebit_values,
+        "dividend_yields": dividend_yields,
     }
     if reversal_filter_params is not None:
         strategy_kwargs["reversal_filter_params"] = reversal_filter_params

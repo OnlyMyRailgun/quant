@@ -1866,3 +1866,52 @@ def test_walk_forward_forwards_dividend_yields_through_12_1_path():
     # HIGH.T (higher yield) must be selected — confirms weight_divy + dividend_yields
     # reached score_research_universe via the 12_1 path.
     assert "HIGH.T" in str(result)
+
+
+def test_walk_forward_forwards_dividend_yields_through_backtrader_path():
+    """Regression: backtrader path must forward weight_divy+dividend_yields to strategy_kwargs.
+
+    Data setup mirrors test_walk_forward_forwards_dividend_yields_through_12_1_path.
+    LOW.T is listed first in the data dict so that with all-zero weights (bug: divy
+    dropped) the stable sort picks LOW.T (rank=1) — i.e. HIGH.T would NOT be bought.
+    With weight_divy=1.0 forwarded (fix), HIGH.T's yield=0.05 > LOW.T's 0.0 gives
+    HIGH.T a higher score, so HIGH.T is bought instead.
+
+    The test inspects symbol_returns: HIGH.T must appear and LOW.T must not,
+    proving the factor is live. With the bug (divy dropped) LOW.T ranks first so
+    LOW.T appears and HIGH.T does not — the assertion fails.
+    """
+    from src.optimize import evaluate_weight_tuple
+
+    # 400 calendar days gives ~280 business days — enough for lookback_mom=90 warmup.
+    dates = pd.date_range("2021-01-01", periods=400, freq="D")
+    flat = pd.DataFrame(
+        {"Open": 100.0, "High": 100.0, "Low": 100.0, "Close": 100.0, "Volume": 1000},
+        index=dates,
+    )
+    # LOW.T first in dict: with all-zero weights (bug) stable sort picks LOW.T rank=1.
+    data = {"LOW.T": flat.copy(), "HIGH.T": flat.copy()}
+
+    result = evaluate_weight_tuple(
+        data,
+        start="2021-06-01",
+        end="2022-02-01",
+        weights=(0.0, 0.0, 0.0),  # mom/vol/rev all 0 — only divy drives selection
+        momentum_definition="12_1",
+        engine="backtrader",
+        top_n=1,
+        weight_divy=1.0,
+        dividend_yields={"HIGH.T": 0.05, "LOW.T": 0.0},
+    )
+
+    traded_symbols = {row["symbol"] for row in result["symbol_returns"]}
+    # HIGH.T must be traded (bought) and LOW.T must not — only divy distinguishes them.
+    assert "HIGH.T" in traded_symbols, (
+        f"Expected HIGH.T to be selected (weight_divy=1.0, yield=0.05), "
+        f"got symbol_returns={result['symbol_returns']!r}. "
+        f"Likely cause: weight_divy/dividend_yields not forwarded to strategy_kwargs."
+    )
+    assert "LOW.T" not in traded_symbols, (
+        f"LOW.T should not be held when HIGH.T has a higher dividend yield, "
+        f"got symbol_returns={result['symbol_returns']!r}."
+    )
