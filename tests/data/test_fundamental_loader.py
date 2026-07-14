@@ -303,3 +303,33 @@ def test_get_ev_ebit_computes_ratio(tmp_path: Path, monkeypatch):
     # EV = price*shares + debt - cash = 5*100 + 200 - 50 = 650; EV/EBIT = 6.5
     result = get_ev_ebit(["X.T"], prices={"X.T": 5.0}, as_of_date=None)
     assert result["X.T"] == 6.5
+
+
+from src.data.fundamental_loader import get_dividend_yields
+
+
+def test_get_dividend_yields_excludes_future_and_sums_ttm(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "src.data.fundamental_loader.DIVIDEND_CACHE", tmp_path / "divs.json"
+    )
+    monkeypatch.setattr(
+        "src.data.fundamental_loader._fetch_dividends",
+        lambda s: {"2023-06-30": 10.0, "2023-12-31": 10.0, "2024-09-30": 99.0},
+    )
+    # as_of 2024-01-31: count only ex-dates in (2023-01-31, 2024-01-31] -> 10 + 10 = 20
+    # price 400 -> yield = 20/400 = 0.05; future 2024-09-30 excluded
+    result = get_dividend_yields(
+        ["X.T"], prices={"X.T": 400.0}, as_of_date=pd.Timestamp("2024-01-31")
+    )
+    assert result["X.T"] == 0.05
+
+
+def test_get_dividend_yields_no_dividends_is_zero(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "src.data.fundamental_loader.DIVIDEND_CACHE", tmp_path / "divs.json"
+    )
+    monkeypatch.setattr("src.data.fundamental_loader._fetch_dividends", lambda s: {})
+    result = get_dividend_yields(
+        ["X.T"], prices={"X.T": 400.0}, as_of_date=pd.Timestamp("2024-01-31")
+    )
+    assert result["X.T"] == 0.0

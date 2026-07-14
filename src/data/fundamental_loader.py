@@ -420,6 +420,51 @@ def get_ev_ebit(
     return result
 
 
+DIVIDEND_CACHE = CACHE_DIR / "divs.json"
+
+
+def _fetch_dividends(ticker: str) -> dict[str, float]:
+    t = yf.Ticker(ticker)
+    try:
+        divs = t.dividends
+    except Exception:
+        return {}
+    if divs is None or len(divs) == 0:
+        return {}
+    return {ts.strftime("%Y-%m-%d"): float(amt) for ts, amt in divs.items()}
+
+
+def get_dividend_yields(
+    symbols: list[str],
+    prices: dict[str, float],
+    as_of_date: pd.Timestamp | None = None,
+    force_refresh: bool = False,
+) -> dict[str, float | None]:
+    cache = _load_json(DIVIDEND_CACHE) if not force_refresh else {}
+    result = {}
+    ref = as_of_date if as_of_date is not None else pd.Timestamp.max
+    window_start = ref - pd.DateOffset(days=365) if as_of_date is not None else pd.Timestamp.min
+    for sym in symbols:
+        if sym not in cache or force_refresh:
+            try:
+                divs = _fetch_dividends(sym)
+            except Exception:
+                divs = {}
+            cache[sym] = divs  # dividends: {} is a valid "no dividends" answer, cache it
+        price = prices.get(sym)
+        if price is None or price <= 0:
+            result[sym] = None
+            continue
+        ttm = 0.0
+        for ex_str, amt in cache.get(sym, {}).items():
+            ex = pd.Timestamp(ex_str)
+            if window_start < ex <= ref:
+                ttm += amt
+        result[sym] = round(ttm / price, 6)
+    _save_json(DIVIDEND_CACHE, cache)
+    return result
+
+
 # ── Earnings Yield (1/trailingPE) quality factor ──
 
 
