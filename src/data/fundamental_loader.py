@@ -339,7 +339,8 @@ def get_market_caps(
             result[sym] = None
         else:
             result[sym] = round(float(price) * float(pit_shares), 4)
-    _save_json(MARKET_CAP_CACHE, cache)
+    if cache:
+        _save_json(MARKET_CAP_CACHE, cache)
     return result
 
 

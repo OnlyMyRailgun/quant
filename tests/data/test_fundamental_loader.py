@@ -242,3 +242,38 @@ def test_get_market_caps_pit_and_price(tmp_path: Path, monkeypatch):
         ["7203.T"], prices={"7203.T": 5.0}, as_of_date=pd.Timestamp("2023-01-01")
     )
     assert result["7203.T"] == 500.0
+
+
+def test_get_market_caps_force_refresh_total_failure_preserves_cache(
+    tmp_path: Path, monkeypatch
+):
+    """When force_refresh=True and every symbol's fetch fails, the existing
+    cache file on disk must NOT be overwritten with an empty dict."""
+    cache_path = tmp_path / "shares.json"
+    monkeypatch.setattr(
+        "src.data.fundamental_loader.MARKET_CAP_CACHE", cache_path
+    )
+
+    # Pre-write a valid cache file for 7203.T
+    valid_cache = {"7203.T": {"2024-03-31": 100.0}}
+    cache_path.write_text(json.dumps(valid_cache))
+
+    # Simulate total fetch failure for every symbol
+    monkeypatch.setattr(
+        "src.data.fundamental_loader._compute_shares_outstanding",
+        lambda s: {},
+    )
+
+    get_market_caps(
+        ["7203.T"],
+        prices={"7203.T": 5.0},
+        as_of_date=None,
+        force_refresh=True,
+    )
+
+    # The cache file must still contain the original valid data
+    with open(cache_path) as f:
+        on_disk = json.load(f)
+    assert on_disk.get("7203.T") == {"2024-03-31": 100.0}, (
+        "Cache was wiped to {} on total fetch failure — existing data must be preserved"
+    )
