@@ -21,6 +21,9 @@ class UniversalMultiFactor(bt.Strategy):
         weight_mom=1.0,      # Weight of momentum factor
         weight_vol=1.0,      # Weight of low volatility factor (higher score mapped to lower vol)
         weight_rev=DEFAULT_WEIGHT_REV,  # Weight of mean reversion factor (higher score mapped to biggest dip)
+        weight_size=0.0,     # Weight of size factor (small-cap premium)
+        weight_evebit=0.0,   # Weight of EV/EBIT factor (low EV/EBIT preferred)
+        weight_divy=0.0,     # Weight of dividend yield factor (high yield preferred)
         top_n=DEFAULT_TOP_N,            # Top N to hold
         buy_rank_threshold=None,
         sell_rank_threshold=None,
@@ -28,6 +31,9 @@ class UniversalMultiFactor(bt.Strategy):
         artifact_run_name="multi_factor_rebalance",
         universe_name=None,
         reversal_filter_params=None,
+        market_caps=None,
+        ev_ebit_values=None,
+        dividend_yields=None,
     )
 
     def __init__(self):
@@ -102,9 +108,15 @@ class UniversalMultiFactor(bt.Strategy):
             weight_mom=self.p.weight_mom,
             weight_vol=self.p.weight_vol,
             weight_rev=self.p.weight_rev,
+            weight_size=self.p.weight_size,
+            weight_evebit=self.p.weight_evebit,
+            weight_divy=self.p.weight_divy,
             lookback_mom=self.p.lookback_mom,
             lookback_vol=self.p.lookback_vol,
             lookback_rev=self.p.lookback_rev,
+            market_caps=self.p.market_caps,
+            ev_ebit_values=self.p.ev_ebit_values,
+            dividend_yields=self.p.dividend_yields,
         )
 
     def _persist_rebalance_artifact(self, ranked: pd.DataFrame):

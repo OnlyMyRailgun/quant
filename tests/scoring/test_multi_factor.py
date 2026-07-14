@@ -266,3 +266,84 @@ def test_calculate_current_signals_applies_quality_factor_with_12_1_momentum():
 
     assert winners["symbol"].tolist() == ["HIGH_ROE.T"]
     assert "qual_contribution" in winners.columns
+
+
+def test_new_value_factors_default_weight_zero_is_unchanged():
+    data = {
+        "AAA.T": make_df([100] * 70 + list(range(100, 110)) + list(range(150, 130, -1))),
+        "BBB.T": make_df([120] * 70 + list(range(120, 110, -1)) + [80] * 20),
+        "CCC.T": make_df([100] * 100),
+    }
+    baseline = score_universe(data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=1.0)
+    with_inputs = score_universe(
+        data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=1.0,
+        market_caps={"AAA.T": 1e9, "BBB.T": 2e9, "CCC.T": 3e9},
+        ev_ebit_values={"AAA.T": 5.0, "BBB.T": 10.0, "CCC.T": 15.0},
+        dividend_yields={"AAA.T": 0.01, "BBB.T": 0.02, "CCC.T": 0.03},
+    )
+    assert with_inputs["total_score"].round(10).tolist() == baseline["total_score"].round(10).tolist()
+
+
+def test_size_factor_prefers_small_cap():
+    data = {"SMALL.T": make_df([100] * 100), "BIG.T": make_df([100] * 100)}
+    result = score_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_size=1.0, market_caps={"SMALL.T": 1e8, "BIG.T": 9e9},
+    )
+    assert result.set_index("symbol").loc["SMALL.T", "size_z"] > 0
+    assert result.iloc[0]["symbol"] == "SMALL.T"
+
+
+def test_evebit_factor_prefers_cheap_and_divy_prefers_high():
+    data = {"CHEAP.T": make_df([100] * 100), "RICH.T": make_df([100] * 100)}
+    ev = score_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_evebit=1.0, ev_ebit_values={"CHEAP.T": 4.0, "RICH.T": 40.0},
+    )
+    assert ev.iloc[0]["symbol"] == "CHEAP.T"
+    dv = score_universe(
+        {"HIGH.T": make_df([100] * 100), "LOW.T": make_df([100] * 100)},
+        top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_divy=1.0, dividend_yields={"HIGH.T": 0.05, "LOW.T": 0.0},
+    )
+    assert dv.iloc[0]["symbol"] == "HIGH.T"
+
+
+def test_paper_signals_forward_size_factor():
+    data = {"SMALL.T": make_df([100] * 100), "BIG.T": make_df([100] * 100)}
+    winners = calculate_current_signals(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_size=1.0, market_caps={"SMALL.T": 1e8, "BIG.T": 9e9},
+    )
+    assert winners.iloc[0]["symbol"] == "SMALL.T"
+
+
+def test_paper_signals_forward_size_factor_12_1():
+    """Regression: paper bot 12_1 path must forward weight_size/market_caps.
+
+    BIG.T is listed first in the data dict so that with all-zero weights (bug:
+    size dropped) the stable sort picks BIG.T rank=1 — SMALL.T would NOT be
+    selected. With weight_size=1.0 forwarded (fix), SMALL.T's small market cap
+    gives it a higher size_z, so SMALL.T wins instead.
+
+    Needs >=252 bars for the 12_1 lookback.
+    """
+    # 300 daily rows is enough for the 252-bar 12_1 lookback.
+    dates = pd.date_range("2021-01-01", periods=300, freq="D")
+    flat = pd.DataFrame({"Close": [100.0] * len(dates)}, index=dates)
+    # BIG.T first: with all-zero weights (bug) stable sort picks BIG.T rank=1.
+    data = {"BIG.T": flat.copy(), "SMALL.T": flat.copy()}
+
+    winners = calculate_current_signals(
+        data, top_n=1,
+        weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_size=1.0, market_caps={"SMALL.T": 1e8, "BIG.T": 9e9},
+        momentum_definition="12_1",
+    )
+
+    assert winners.iloc[0]["symbol"] == "SMALL.T", (
+        f"Expected SMALL.T to be selected (weight_size=1.0, small market cap), "
+        f"got {winners['symbol'].tolist()!r}. "
+        f"Likely cause: weight_size/market_caps not forwarded to score_research_universe "
+        f"on the 12_1 paper bot path."
+    )

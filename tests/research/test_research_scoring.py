@@ -98,3 +98,47 @@ def test_score_research_universe_applies_quality_factor_when_roe_values_are_supp
     assert "qual_contribution" in results.columns
     assert results.loc[0, "qual_contribution"] > results.loc[1, "qual_contribution"]
     assert bool(results.loc[0, "is_top_n"]) is True
+
+
+def _flat_300():
+    dates = pd.date_range("2021-01-01", periods=300, freq="D")
+    return pd.DataFrame({"Close": [100.0] * len(dates)}, index=dates)
+
+
+def test_research_new_factors_default_weight_zero_is_unchanged():
+    data = {"AAA.T": _flat_300(), "BBB.T": _flat_300(), "CCC.T": _flat_300()}
+    baseline = score_research_universe(
+        data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=0.0,
+        momentum_definition="12_1",
+    )
+    with_inputs = score_research_universe(
+        data, top_n=2, weight_mom=1.0, weight_vol=1.0, weight_rev=0.0,
+        momentum_definition="12_1",
+        market_caps={"AAA.T": 1e9, "BBB.T": 2e9, "CCC.T": 3e9},
+        ev_ebit_values={"AAA.T": 5.0, "BBB.T": 10.0, "CCC.T": 15.0},
+        dividend_yields={"AAA.T": 0.01, "BBB.T": 0.02, "CCC.T": 0.03},
+    )
+    assert with_inputs["total_score"].round(10).tolist() == baseline["total_score"].round(10).tolist()
+
+
+def test_research_size_evebit_divy_directions():
+    data = {"AAA.T": _flat_300(), "BBB.T": _flat_300()}
+    sz = score_research_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_size=1.0, market_caps={"AAA.T": 1e8, "BBB.T": 9e9},
+        momentum_definition="12_1",
+    )
+    assert sz.set_index("symbol").loc["AAA.T", "size_z"] > 0
+    assert sz.iloc[0]["symbol"] == "AAA.T"
+    ev = score_research_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_evebit=1.0, ev_ebit_values={"AAA.T": 4.0, "BBB.T": 40.0},
+        momentum_definition="12_1",
+    )
+    assert ev.iloc[0]["symbol"] == "AAA.T"
+    dv = score_research_universe(
+        data, top_n=1, weight_mom=0.0, weight_vol=0.0, weight_rev=0.0,
+        weight_divy=1.0, dividend_yields={"AAA.T": 0.05, "BBB.T": 0.0},
+        momentum_definition="12_1",
+    )
+    assert dv.iloc[0]["symbol"] == "AAA.T"
