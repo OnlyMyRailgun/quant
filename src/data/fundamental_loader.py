@@ -344,6 +344,82 @@ def get_market_caps(
     return result
 
 
+EV_EBIT_CACHE = CACHE_DIR / "evebit.json"
+
+
+def _compute_ev_ebit_inputs(ticker: str) -> dict[str, dict]:
+    t = yf.Ticker(ticker)
+    try:
+        fin = t.financials
+        bs = t.balance_sheet
+    except Exception:
+        return {}
+    if fin is None or fin.empty or bs is None or bs.empty:
+        return {}
+    if "EBIT" not in fin.index:
+        return {}
+    result = {}
+    for col in fin.columns:
+        if col not in bs.columns:
+            continue
+        ebit = fin.loc["EBIT", col]
+        if pd.isna(ebit):
+            continue
+        debt = 0.0
+        for k in ["Total Debt", "Long Term Debt"]:
+            if k in bs.index and not pd.isna(bs.loc[k, col]):
+                debt = float(bs.loc[k, col])
+                break
+        cash = 0.0
+        for k in ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"]:
+            if k in bs.index and not pd.isna(bs.loc[k, col]):
+                cash = float(bs.loc[k, col])
+                break
+        shares = None
+        if "Ordinary Shares Number" in bs.index and not pd.isna(bs.loc["Ordinary Shares Number", col]):
+            treasury = 0.0
+            if "Treasury Shares Number" in bs.index and not pd.isna(bs.loc["Treasury Shares Number", col]):
+                treasury = float(bs.loc["Treasury Shares Number", col])
+            shares = float(bs.loc["Ordinary Shares Number", col]) - treasury
+        if shares is None or shares <= 0:
+            continue
+        result[col.strftime("%Y-%m-%d")] = {
+            "ebit": float(ebit), "debt": debt, "cash": cash, "shares": shares,
+        }
+    return result
+
+
+def get_ev_ebit(
+    symbols: list[str],
+    prices: dict[str, float],
+    as_of_date: pd.Timestamp | None = None,
+    force_refresh: bool = False,
+) -> dict[str, float | None]:
+    cache = _load_json(EV_EBIT_CACHE) if not force_refresh else {}
+    result = {}
+    for sym in symbols:
+        if not cache.get(sym) or force_refresh:
+            try:
+                inputs = _compute_ev_ebit_inputs(sym)
+            except Exception:
+                inputs = {}
+            if inputs:
+                cache[sym] = inputs
+        pit = _pit_pick(cache.get(sym, {}), as_of_date)
+        price = prices.get(sym)
+        if pit is None or price is None or pit["ebit"] <= 0:
+            result[sym] = None
+            continue
+        ev = float(price) * pit["shares"] + pit["debt"] - pit["cash"]
+        if ev < 0:
+            result[sym] = None
+            continue
+        result[sym] = round(ev / pit["ebit"], 4)
+    if cache:
+        _save_json(EV_EBIT_CACHE, cache)
+    return result
+
+
 # ── Earnings Yield (1/trailingPE) quality factor ──
 
 

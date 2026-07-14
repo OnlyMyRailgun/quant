@@ -11,6 +11,7 @@ from src.data.fundamental_loader import (
     get_book_values,
     get_market_caps,
     _compute_shares_outstanding,
+    get_ev_ebit,
 )
 
 
@@ -277,3 +278,28 @@ def test_get_market_caps_force_refresh_total_failure_preserves_cache(
     assert on_disk.get("7203.T") == {"2024-03-31": 100.0}, (
         "Cache was wiped to {} on total fetch failure — existing data must be preserved"
     )
+
+
+def test_get_ev_ebit_negative_ebit_returns_none(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "src.data.fundamental_loader.EV_EBIT_CACHE", tmp_path / "evebit.json"
+    )
+    monkeypatch.setattr(
+        "src.data.fundamental_loader._compute_ev_ebit_inputs",
+        lambda s: {"2024-03-31": {"ebit": -50.0, "debt": 100.0, "cash": 10.0, "shares": 100.0}},
+    )
+    result = get_ev_ebit(["X.T"], prices={"X.T": 5.0}, as_of_date=None)
+    assert result["X.T"] is None
+
+
+def test_get_ev_ebit_computes_ratio(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "src.data.fundamental_loader.EV_EBIT_CACHE", tmp_path / "evebit.json"
+    )
+    monkeypatch.setattr(
+        "src.data.fundamental_loader._compute_ev_ebit_inputs",
+        lambda s: {"2024-03-31": {"ebit": 100.0, "debt": 200.0, "cash": 50.0, "shares": 100.0}},
+    )
+    # EV = price*shares + debt - cash = 5*100 + 200 - 50 = 650; EV/EBIT = 6.5
+    result = get_ev_ebit(["X.T"], prices={"X.T": 5.0}, as_of_date=None)
+    assert result["X.T"] == 6.5
