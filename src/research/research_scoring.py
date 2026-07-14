@@ -69,11 +69,17 @@ def score_research_universe(
     weight_rev: float = DEFAULT_WEIGHT_REV,
     weight_val: float = 0.0,
     weight_qual: float = 0.0,
+    weight_size: float = 0.0,
+    weight_evebit: float = 0.0,
+    weight_divy: float = 0.0,
     momentum_definition: Literal["90d", "12_1"] = "90d",
     lookback_vol: int = DEFAULT_LOOKBACK_VOL,
     lookback_rev: int = DEFAULT_LOOKBACK_REV,
     book_values: Mapping[str, float | None] | None = None,
     roe_values: Mapping[str, float | None] | None = None,
+    market_caps: Mapping[str, float | None] | None = None,
+    ev_ebit_values: Mapping[str, float | None] | None = None,
+    dividend_yields: Mapping[str, float | None] | None = None,
 ) -> pd.DataFrame:
     """
     Score a symbol universe using cross-sectional multi-factor ranking with
@@ -88,8 +94,14 @@ def score_research_universe(
     raw_rev: list[float] = []
     raw_val: list[float] = []
     raw_qual: list[float] = []
+    raw_size: list[float] = []
+    raw_evebit: list[float] = []
+    raw_divy: list[float] = []
     use_value = book_values is not None and weight_val > 0.0
     use_qual = roe_values is not None and weight_qual > 0.0
+    use_size = market_caps is not None and weight_size > 0.0
+    use_evebit = ev_ebit_values is not None and weight_evebit > 0.0
+    use_divy = dividend_yields is not None and weight_divy > 0.0
 
     required_history = 252 if momentum_definition == "12_1" else max(DEFAULT_LOOKBACK_MOM, lookback_vol, lookback_rev)
 
@@ -136,6 +148,22 @@ def score_research_universe(
                 factors["qual_raw"] = roe
             raw_qual.append(roe)
 
+        if use_size:
+            mc = market_caps.get(symbol)
+            sz = float(mc) if (mc is not None and mc > 0) else math.nan
+            factors["size_raw"] = sz
+            raw_size.append(sz)
+        if use_evebit:
+            ee = ev_ebit_values.get(symbol)
+            ee_v = float(ee) if (ee is not None and math.isfinite(ee)) else math.nan
+            factors["evebit_raw"] = ee_v
+            raw_evebit.append(ee_v)
+        if use_divy:
+            dy = dividend_yields.get(symbol)
+            dy_v = float(dy) if (dy is not None and math.isfinite(dy)) else math.nan
+            factors["divy_raw"] = dy_v
+            raw_divy.append(dy_v)
+
         raw_mom.append(factors["mom_raw"])
         raw_vol.append(factors["vol_raw"])
         raw_rev.append(factors["rev_raw"])
@@ -163,6 +191,9 @@ def score_research_universe(
     rev_z = _safe_zscores(raw_rev, invert=True)
     val_z = _safe_zscores(raw_val, invert=True) if use_value else [0.0] * len(records)
     qual_z = _safe_zscores(raw_qual, invert=False) if use_qual else [0.0] * len(records)
+    size_z = _safe_zscores(raw_size, invert=True) if use_size else [0.0] * len(records)
+    evebit_z = _safe_zscores(raw_evebit, invert=True) if use_evebit else [0.0] * len(records)
+    divy_z = _safe_zscores(raw_divy, invert=False) if use_divy else [0.0] * len(records)
 
     for i, record in enumerate(records):
         record["mom_z"] = mom_z[i]
@@ -180,6 +211,18 @@ def score_research_universe(
             record["qual_z"] = qual_z[i]
             record["qual_contribution"] = weight_qual * qual_z[i]
             total += record["qual_contribution"]
+        if use_size:
+            record["size_z"] = size_z[i]
+            record["size_contribution"] = weight_size * size_z[i]
+            total += record["size_contribution"]
+        if use_evebit:
+            record["evebit_z"] = evebit_z[i]
+            record["evebit_contribution"] = weight_evebit * evebit_z[i]
+            total += record["evebit_contribution"]
+        if use_divy:
+            record["divy_z"] = divy_z[i]
+            record["divy_contribution"] = weight_divy * divy_z[i]
+            total += record["divy_contribution"]
         record["total_score"] = total
 
     ranked = pd.DataFrame(records)
